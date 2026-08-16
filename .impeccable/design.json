@@ -1,0 +1,149 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-16T20:47:41.2346108Z",
+  "title": "Design System: Revolving Plex Manager",
+  "extensions": {
+    "colorMeta": {
+      "midnight-canvas": { "role": "neutral", "displayName": "Midnight Canvas", "canonical": "oklch(0.115 0.008 260)", "tonalRamp": ["oklch(0.15 0.008 260)", "oklch(0.25 0.008 260)", "oklch(0.35 0.008 260)", "oklch(0.47 0.008 260)", "oklch(0.59 0.008 260)", "oklch(0.71 0.008 260)", "oklch(0.83 0.008 260)", "oklch(0.95 0.008 260)"] },
+      "media-surface": { "role": "neutral", "displayName": "Media Surface", "canonical": "oklch(0.165 0.01 260)", "tonalRamp": ["oklch(0.15 0.01 260)", "oklch(0.25 0.01 260)", "oklch(0.35 0.01 260)", "oklch(0.47 0.01 260)", "oklch(0.59 0.01 260)", "oklch(0.71 0.01 260)", "oklch(0.83 0.01 260)", "oklch(0.95 0.01 260)"] },
+      "raised-surface": { "role": "neutral", "displayName": "Raised Surface", "canonical": "oklch(0.205 0.012 260)", "tonalRamp": ["oklch(0.15 0.012 260)", "oklch(0.25 0.012 260)", "oklch(0.35 0.012 260)", "oklch(0.47 0.012 260)", "oklch(0.59 0.012 260)", "oklch(0.71 0.012 260)", "oklch(0.83 0.012 260)", "oklch(0.95 0.012 260)"] },
+      "quiet-divider": { "role": "neutral", "displayName": "Quiet Divider", "canonical": "oklch(0.335 0.012 260)", "tonalRamp": ["oklch(0.15 0.012 260)", "oklch(0.25 0.012 260)", "oklch(0.35 0.012 260)", "oklch(0.47 0.012 260)", "oklch(0.59 0.012 260)", "oklch(0.71 0.012 260)", "oklch(0.83 0.012 260)", "oklch(0.95 0.012 260)"] },
+      "control-outline": { "role": "neutral", "displayName": "Control Outline", "canonical": "oklch(0.52 0.012 260)", "tonalRamp": ["oklch(0.15 0.012 260)", "oklch(0.25 0.012 260)", "oklch(0.35 0.012 260)", "oklch(0.47 0.012 260)", "oklch(0.59 0.012 260)", "oklch(0.71 0.012 260)", "oklch(0.83 0.012 260)", "oklch(0.95 0.012 260)"] },
+      "warm-ink": { "role": "neutral", "displayName": "Warm Ink", "canonical": "oklch(0.955 0.005 80)", "tonalRamp": ["oklch(0.15 0.005 80)", "oklch(0.25 0.005 80)", "oklch(0.35 0.005 80)", "oklch(0.47 0.005 80)", "oklch(0.59 0.005 80)", "oklch(0.71 0.005 80)", "oklch(0.83 0.005 80)", "oklch(0.95 0.005 80)"] },
+      "cool-muted": { "role": "neutral", "displayName": "Cool Muted", "canonical": "oklch(0.735 0.012 260)", "tonalRamp": ["oklch(0.15 0.012 260)", "oklch(0.25 0.012 260)", "oklch(0.35 0.012 260)", "oklch(0.47 0.012 260)", "oklch(0.59 0.012 260)", "oklch(0.71 0.012 260)", "oklch(0.83 0.012 260)", "oklch(0.95 0.012 260)"] },
+      "safety-amber": { "role": "primary", "displayName": "Safety Amber", "canonical": "oklch(0.784 0.144 79.8)", "tonalRamp": ["oklch(0.15 0.08 79.8)", "oklch(0.25 0.11 79.8)", "oklch(0.35 0.13 79.8)", "oklch(0.47 0.144 79.8)", "oklch(0.59 0.144 79.8)", "oklch(0.71 0.13 79.8)", "oklch(0.83 0.10 79.8)", "oklch(0.95 0.04 79.8)"] },
+      "action-amber": { "role": "primary", "displayName": "Action Amber", "canonical": "oklch(0.48 0.14 76)", "tonalRamp": ["oklch(0.15 0.08 76)", "oklch(0.25 0.11 76)", "oklch(0.35 0.13 76)", "oklch(0.47 0.14 76)", "oklch(0.59 0.14 76)", "oklch(0.71 0.13 76)", "oklch(0.83 0.10 76)", "oklch(0.95 0.04 76)"] },
+      "focus-cyan": { "role": "secondary", "displayName": "Focus Cyan", "canonical": "oklch(0.77 0.125 220)", "tonalRamp": ["oklch(0.15 0.07 220)", "oklch(0.25 0.10 220)", "oklch(0.35 0.12 220)", "oklch(0.47 0.125 220)", "oklch(0.59 0.125 220)", "oklch(0.71 0.11 220)", "oklch(0.83 0.08 220)", "oklch(0.95 0.03 220)"] },
+      "healthy-green": { "role": "tertiary", "displayName": "Healthy Green", "canonical": "oklch(0.7 0.145 150)", "tonalRamp": ["oklch(0.15 0.08 150)", "oklch(0.25 0.11 150)", "oklch(0.35 0.13 150)", "oklch(0.47 0.145 150)", "oklch(0.59 0.145 150)", "oklch(0.71 0.13 150)", "oklch(0.83 0.10 150)", "oklch(0.95 0.04 150)"] },
+      "danger-red": { "role": "tertiary", "displayName": "Danger Red", "canonical": "oklch(0.635 0.19 28)", "tonalRamp": ["oklch(0.15 0.10 28)", "oklch(0.25 0.14 28)", "oklch(0.35 0.17 28)", "oklch(0.47 0.19 28)", "oklch(0.59 0.19 28)", "oklch(0.71 0.16 28)", "oklch(0.83 0.11 28)", "oklch(0.95 0.04 28)"] }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "Primary operational status field." },
+      "headline": { "displayName": "Headline", "purpose": "Page titles." },
+      "body": { "displayName": "Body", "purpose": "Explanations, forms, and operational copy." },
+      "label": { "displayName": "Machine Label", "purpose": "Rollout state, reason codes, timestamps, and identifiers." }
+    },
+    "shadows": [
+      { "name": "ambient-panel", "value": "0 1.5rem 5rem oklch(0 0 0 / 0.32)", "purpose": "Major raised operational surfaces." },
+      { "name": "media-tile", "value": "0 0.7rem 1.4rem oklch(0 0 0 / 0.25)", "purpose": "Poster-proportioned service tiles." },
+      { "name": "media-spine", "value": "0.2rem 0.7rem 1.5rem oklch(0 0 0 / 0.24)", "purpose": "Narrow movie and season case spines in lifecycle views." }
+    ],
+    "motion": [
+      { "name": "state-standard", "value": "180ms ease-out", "purpose": "Button background, border, and press transitions." },
+      { "name": "title-link", "value": "160ms ease-out", "purpose": "Lifecycle title color on row hover." },
+      { "name": "reduced-motion", "value": "0.01ms", "purpose": "Removes nonessential transitions when reduced motion is requested." }
+    ],
+    "breakpoints": [
+      { "name": "wide-integration", "value": "1450px" },
+      { "name": "stacked-integration", "value": "1100px" },
+      { "name": "compact-shell", "value": "880px" },
+      { "name": "phone", "value": "520px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The main routine action on a surface.",
+      "html": "<button class=\"ds-button ds-button-primary\">Save disabled service</button>",
+      "css": ".ds-button { min-height: 2.75rem; display: inline-flex; align-items: center; justify-content: center; padding: 0.7rem 1rem; border: 1px solid transparent; border-radius: var(--radius-sm); font: 720 1rem \"Segoe UI Variable\", Aptos, ui-sans-serif, system-ui, sans-serif; cursor: pointer; transition: background-color 180ms ease-out, border-color 180ms ease-out, transform 180ms ease-out; } .ds-button-primary { background: var(--primary-strong); color: oklch(1 0 0); } .ds-button-primary:hover { background: oklch(0.54 0.15 76); } .ds-button:active { transform: translateY(1px); } .ds-button:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "A routine read-only or configuration action.",
+      "html": "<button class=\"ds-button ds-button-secondary\">Test connection</button>",
+      "css": ".ds-button { min-height: 2.75rem; display: inline-flex; align-items: center; justify-content: center; padding: 0.7rem 1rem; border: 1px solid transparent; border-radius: var(--radius-sm); font: 720 1rem \"Segoe UI Variable\", Aptos, ui-sans-serif, system-ui, sans-serif; cursor: pointer; transition: background-color 180ms ease-out, border-color 180ms ease-out, transform 180ms ease-out; } .ds-button-secondary { border-color: var(--control-border); background: var(--raised); color: var(--ink); } .ds-button-secondary:hover { border-color: var(--ink); background: oklch(0.24 0.014 260); } .ds-button:active { transform: translateY(1px); } .ds-button:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }"
+    },
+    {
+      "name": "Danger Button",
+      "kind": "button",
+      "description": "A visibly consequential capability gate.",
+      "html": "<button class=\"ds-button ds-button-danger\">Enable Active Management</button>",
+      "css": ".ds-button { min-height: 2.75rem; display: inline-flex; align-items: center; justify-content: center; padding: 0.7rem 1rem; border: 1px solid transparent; border-radius: var(--radius-sm); color: var(--ink); font: 720 1rem \"Segoe UI Variable\", Aptos, ui-sans-serif, system-ui, sans-serif; cursor: pointer; transition: background-color 180ms ease-out, transform 180ms ease-out; } .ds-button-danger { border-color: oklch(0.635 0.19 28 / 0.75); background: oklch(0.36 0.14 28); } .ds-button-danger:hover { background: oklch(0.42 0.16 28); } .ds-button:active { transform: translateY(1px); } .ds-button:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }"
+    },
+    {
+      "name": "Text Field",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "A visibly labeled connection field with adjacent help.",
+      "html": "<label class=\"ds-field\">Internal URL<input value=\"http://192.168.1.20:32400\"><small>Include any configured base path.</small></label>",
+      "css": ".ds-field { display: grid; gap: 0.55rem; color: var(--ink); font: 680 0.9rem \"Segoe UI Variable\", Aptos, ui-sans-serif, system-ui, sans-serif; } .ds-field input { width: 100%; padding: 0.8rem 0.9rem; border: 1px solid var(--control-border); border-radius: var(--radius-sm); background: var(--bg); color: var(--ink); font: inherit; font-weight: 400; } .ds-field input:hover { border-color: var(--ink); } .ds-field input:focus { border-color: var(--primary); outline: 3px solid oklch(0.784 0.144 79.8 / 0.22); } .ds-field small { color: var(--muted); font-weight: 450; }"
+    },
+    {
+      "name": "Status Pill",
+      "kind": "chip",
+      "refersTo": "status-pill",
+      "description": "A compact global rollout-state summary that pairs text and a dot.",
+      "html": "<span class=\"ds-status-pill\"><span aria-hidden=\"true\"></span>INVENTORY ONLY</span>",
+      "css": ".ds-status-pill { display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.45rem 0.7rem; border: 1px solid var(--border); border-radius: 999px; color: var(--muted); font: 680 0.74rem ui-monospace, SFMono-Regular, Consolas, monospace; } .ds-status-pill > span { width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--primary); } .ds-status-pill:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }"
+    },
+    {
+      "name": "Integration Service Row",
+      "kind": "custom",
+      "description": "The signature media-forward service identity and explicit state pattern.",
+      "html": "<article class=\"ds-integration-row\"><div class=\"ds-service-tile\" aria-hidden=\"true\">P</div><div class=\"ds-service-copy\"><strong>Living room Plex</strong><span>Plex · http://192.168.1.20:32400</span></div><div class=\"ds-state\"><span></span>Enabled read-only</div></article>",
+      "css": ".ds-integration-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 1rem; align-items: center; padding: 1.35rem 0; border-bottom: 1px solid var(--border); color: var(--ink); font-family: \"Segoe UI Variable\", Aptos, ui-sans-serif, system-ui, sans-serif; } .ds-service-tile { width: 3rem; aspect-ratio: 2 / 3; display: grid; place-items: center; border-radius: var(--radius-sm); background: oklch(0.43 0.12 78); color: var(--ink); font-weight: 800; box-shadow: 0 0.7rem 1.4rem oklch(0 0 0 / 0.25); } .ds-service-copy { min-width: 0; display: grid; gap: 0.3rem; } .ds-service-copy span { overflow: hidden; color: var(--muted); font-size: 0.84rem; text-overflow: ellipsis; white-space: nowrap; } .ds-state { color: oklch(0.82 0.11 150); font-size: 0.75rem; font-weight: 700; } .ds-state > span { display: inline-block; width: 0.45rem; height: 0.45rem; margin-right: 0.45rem; border-radius: 50%; background: oklch(0.7 0.145 150); } .ds-integration-row:focus-within { outline: 3px solid var(--focus); outline-offset: 3px; }"
+    },
+    {
+      "name": "Source Freshness Cue",
+      "kind": "custom",
+      "description": "A first-viewport evidence-clock entry with explicit freshness and synchronization time.",
+      "html": "<div class=\"ds-source-cue ds-source-cue-fresh\"><strong>Tautulli</strong><span>Fresh</span><small>2026-08-16 20:30 UTC</small></div>",
+      "css": ".ds-source-cue { position: relative; display: grid; gap: 0.2rem; min-height: 5.6rem; padding: 0.75rem 1rem 0.75rem 1.3rem; border-left: 1px solid var(--border); color: var(--ink); font-family: \"Segoe UI Variable\", Aptos, ui-sans-serif, system-ui, sans-serif; } .ds-source-cue::before { content: \"\"; position: absolute; left: -0.25rem; top: 0.95rem; width: 0.45rem; height: 0.45rem; border-radius: 50%; background: var(--danger); } .ds-source-cue-fresh::before { background: oklch(0.7 0.145 150); } .ds-source-cue span { color: var(--muted); font-size: 0.78rem; font-weight: 700; } .ds-source-cue small { color: var(--muted); font-size: 0.7rem; line-height: 1.35; } .ds-source-cue:focus-within { outline: 3px solid var(--focus); outline-offset: 3px; }"
+    },
+    {
+      "name": "Lifecycle Workbench Row",
+      "kind": "custom",
+      "description": "The signature chronological case-file summary for one managed movie or season.",
+      "html": "<article class=\"ds-lifecycle-row\"><a class=\"ds-lifecycle-main\" href=\"#\"><span class=\"ds-media-spine\" aria-hidden=\"true\">M</span><span class=\"ds-lifecycle-title\"><strong>Arrival</strong><small>Radarr · Movie · 2016</small></span></a><div class=\"ds-lifecycle-track\"><div><span>Imported</span><strong>2026-05-02</strong></div><div><span>Last meaningful watch</span><strong>2026-07-14</strong></div><div><span>Retention deadline</span><strong>2026-09-08</strong></div></div><div class=\"ds-lifecycle-verdict\"><span>Keep protected</span><small>Protected · 1 torrent mapping</small></div></article>",
+      "css": ".ds-lifecycle-row { display: grid; grid-template-columns: minmax(15rem, 0.9fr) minmax(28rem, 1.4fr) minmax(12rem, 0.55fr); gap: 1.5rem; align-items: center; min-height: 7.8rem; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); color: var(--ink); font-family: \"Segoe UI Variable\", Aptos, ui-sans-serif, system-ui, sans-serif; } .ds-lifecycle-main { display: flex; align-items: center; gap: 1rem; min-width: 0; color: var(--ink); text-decoration: none; } .ds-media-spine { width: 2.75rem; height: 4.25rem; flex: 0 0 auto; display: grid; place-items: end center; padding-bottom: 0.45rem; border-radius: 0.25rem 0.5rem 0.5rem 0.25rem; background: oklch(0.31 0.075 67); color: oklch(0.9 0.07 79.8); font: 780 0.75rem ui-monospace, SFMono-Regular, Consolas, monospace; box-shadow: 0.2rem 0.7rem 1.5rem oklch(0 0 0 / 0.24); } .ds-lifecycle-title { display: grid; gap: 0.35rem; } .ds-lifecycle-title small, .ds-lifecycle-track span, .ds-lifecycle-verdict small { color: var(--muted); } .ds-lifecycle-main:hover strong { color: var(--primary); } .ds-lifecycle-main:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; } .ds-lifecycle-track { position: relative; display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; } .ds-lifecycle-track::before { content: \"\"; position: absolute; left: 0.35rem; right: 0.35rem; top: 0.35rem; height: 1px; background: var(--control-border); } .ds-lifecycle-track div { position: relative; display: grid; gap: 0.4rem; padding-top: 1.25rem; } .ds-lifecycle-track div::before { content: \"\"; position: absolute; top: 0; left: 0; width: 0.72rem; height: 0.72rem; border: 2px solid var(--bg); border-radius: 50%; background: var(--primary); } .ds-lifecycle-track span { font-size: 0.7rem; } .ds-lifecycle-track strong { font-size: 0.82rem; } .ds-lifecycle-verdict { display: grid; justify-items: start; gap: 0.45rem; } .ds-lifecycle-verdict > span { padding: 0.35rem 0.55rem; border-radius: 0.35rem; background: oklch(0.784 0.144 79.8 / 0.14); color: oklch(0.9 0.07 79.8); font-size: 0.7rem; font-weight: 800; }"
+    },
+    {
+      "name": "Lifecycle Case Timeline",
+      "kind": "custom",
+      "description": "The expanded four-stop evidence chronology at the top of a read-only title case file.",
+      "html": "<section class=\"ds-case-timeline\" aria-label=\"Lifecycle timeline\"><div><span>Original import</span><strong>2026-05-02 18:40 UTC</strong></div><div><span>Last meaningful watch</span><strong>2026-07-14 21:10 UTC</strong></div><div><span>Retention deadline</span><strong>2026-09-08 21:10 UTC</strong></div><div><span>Protection</span><strong>Protected · Arr tag</strong></div></section>",
+      "css": ".ds-case-timeline { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 2.5rem 0 4rem; color: var(--ink); font-family: \"Segoe UI Variable\", Aptos, ui-sans-serif, system-ui, sans-serif; } .ds-case-timeline > div { position: relative; display: grid; gap: 0.5rem; min-height: 5.6rem; padding: 1.45rem 1rem 0 0; border-top: 1px solid var(--control-border); } .ds-case-timeline > div::before { content: \"\"; position: absolute; top: -0.42rem; width: 0.8rem; height: 0.8rem; border-radius: 50%; background: var(--primary); } .ds-case-timeline span { color: var(--muted); font-size: 0.75rem; } .ds-case-timeline strong { max-width: 24ch; font-size: 0.88rem; line-height: 1.45; } .ds-case-timeline:focus-within { outline: 3px solid var(--focus); outline-offset: 3px; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Safety-Lit Media Room",
+    "overview": "Revolving Plex Manager belongs beside familiar media-server tools in a dim home office or media room, but it is calmer and more explicit around consequential operations. Near-black surfaces, restrained tonal depth, poster-like geometry, and sparing amber cues create a media-forward identity without imitating Plex branding.\n\nOperational understanding always outranks decoration. Every title is treated as a lifecycle case file rather than another poster in a generic media grid: source freshness, import history, meaningful playback, retention, protection, and torrent evidence are traced before any verdict or future action. The first viewport establishes whether the evidence can be trusted, then leads into a chronological workbench. Dense service information remains legible, important state is written out, and progressively disclosed controls reveal complexity only when the owner asks for it.\n\nThe lifecycle workbench is the signature expression of Direction B, anchored by concept seed `c0c31952`. It extends the same near-black surfaces, poster geometry, restrained amber selection, and explicit text states already used by integrations; it does not introduce a separate dashboard language. The interface refuses generic metric-card dashboards, ornamental glass effects, and graph-heavy monitoring-console styling.",
+    "keyCharacteristics": [
+      "Dark, restrained media-control surfaces.",
+      "Poster-proportioned imagery and service marks used as context, not content replacement.",
+      "Safety state and prerequisites visible before action.",
+      "Source freshness and chronological evidence visible before verdicts.",
+      "Amber reserved for selection, progress, and primary emphasis.",
+      "Compact, text-forward operational density."
+    ],
+    "rules": [
+      { "name": "The Amber Is Earned Rule", "body": "Use amber for selection, progress, protected state, and primary emphasis—not as ambient decoration.", "section": "colors" },
+      { "name": "The Text Carries State Rule", "body": "Color and dots may reinforce a state, but a visible text label must communicate it.", "section": "colors" },
+      { "name": "The Plain-Language First Rule", "body": "Lead with the human-readable decision or prerequisite; identifiers and machine detail support it rather than replace it.", "section": "typography" },
+      { "name": "The One Active Form Rule", "body": "Keep one prominent creation or connection form in view while the surrounding list supplies context and management actions.", "section": "layout" },
+      { "name": "The Evidence Before Verdict Rule", "body": "Establish freshness and chronology before presenting a lifecycle decision; the user should be able to trace the verdict in reading order.", "section": "layout" },
+      { "name": "The Tonal-First Rule", "body": "Establish hierarchy with surface color and dividers before adding shadow.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do show safety state and prerequisites before presenting consequential actions.",
+      "Do use lists and split detail regions for dense operational information.",
+      "Do keep health, enablement, management mode, and Active Management textually distinct.",
+      "Do use poster-like media geometry to establish context without obscuring URLs, health, or controls.",
+      "Do order lifecycle evidence from source freshness through import, watch, retention, protection, and torrent mapping before future action.",
+      "Do treat each media title as a traceable case file with explicit unknown, stale, blocked, and empty states.",
+      "Do preserve visible labels, local validation, keyboard focus, and reduced-motion behavior."
+    ],
+    "donts": [
+      "Don't hide critical state behind an icon, dot, or color alone.",
+      "Don't make destructive controls look equivalent to routine connection or read-only actions.",
+      "Don't turn repeated service records into a generic grid of floating cards.",
+      "Don't collapse lifecycle evidence into a poster grid, a single opaque score, or a color-only verdict.",
+      "Don't use ornamental glass, decorative page-load choreography, or graph-heavy console styling.",
+      "Don't expose saved credentials back to the browser."
+    ]
+  }
+}

@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Dashboard · {{ app_name }}{% endblock %}
+{% block body %}
+<div class="app-shell">
+  {% set active_page = "dashboard" %}{% include "_sidebar.html" %}
+  <main class="workspace">
+    <header class="page-header">
+      <div><h1>Safe by default.</h1><p class="header-support">System overview</p></div>
+      <span class="status-pill status-neutral"><span aria-hidden="true"></span>{{ rollout_mode }}</span>
+    </header>
+    <section class="readiness" aria-labelledby="readiness-title">
+      <div class="readiness-copy">
+        <h2 id="readiness-title">Foundation active</h2>
+        <p>The local administrator, SQLite persistence, CSRF protection, secret redaction, and immutable event writer are in place. No integration can manage media.</p>
+      </div>
+      <dl class="readiness-facts">
+        <div><dt>Rollout</dt><dd>Inventory only</dd></div>
+        <div><dt>Integration writes</dt><dd>Unavailable</dd></div>
+        <div><dt>Recorded events</dt><dd>{{ event_count }}</dd></div>
+      </dl>
+    </section>
+    <section class="next-work" aria-labelledby="next-title">
+      <div><h2 id="next-title">Connect without managing</h2></div>
+      <p>Add Overseerr or an Arr instance, verify the connection, then explicitly enable read-only synchronization. Active Management remains independently off.</p>
+      <a class="button button-primary" href="/integrations">Open integrations</a>
+    </section>
+  </main>
+</div>
+{% endblock %}

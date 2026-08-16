@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+{% block title %}Integrations · {{ app_name }}{% endblock %}
+{% block body %}
+<div class="app-shell">
+  {% set active_page = "integrations" %}{% include "_sidebar.html" %}
+  <main class="workspace integrations-workspace">
+    <header class="page-header">
+      <div><h1>Integrations</h1><p class="header-support">Connect, verify, then deliberately widen access.</p></div>
+      <span class="status-pill status-neutral"><span aria-hidden="true"></span>INVENTORY ONLY</span>
+    </header>
+
+    {% if message %}<div class="notice notice-success" role="status">{{ message }}</div>{% endif %}
+    {% if error %}<div class="notice notice-error" role="alert">{{ error }}</div>{% endif %}
+    {% if errors %}<div class="notice notice-error" role="alert"><strong>Check the highlighted field.</strong></div>{% endif %}
+
+    <section class="integration-layout" aria-label="Integration setup">
+      <div class="integration-list">
+        <div class="section-heading">
+          <div><h2>Connected services</h2><p>Every service begins disabled. Connection tests are always available.</p></div>
+          <p>{{ integrations|length }} configured</p>
+        </div>
+        {% if integrations %}
+          {% for integration in integrations %}
+          {% set libraries = libraries_by_plex.get(integration.id, []) %}
+          {% set source = freshness_by_integration.get(integration.id) %}
+          <article class="integration-row">
+            <div class="integration-summary">
+              <div class="integration-identity">
+                <span class="service-tile service-{{ integration.kind|lower }}" aria-hidden="true">{{ integration.kind[0] }}</span>
+                <div><h3>{{ integration.name }}</h3><p>{{ integration.kind|replace('QBITTORRENT', 'qBittorrent')|title }} · {{ integration.base_url }}</p></div>
+              </div>
+              <div class="integration-state" aria-label="{{ integration.name }} state">
+                <span class="state-label state-{{ integration.health_status|lower }}">{{ integration.health_status|replace('_', ' ') }}</span>
+                <span class="state-label {% if integration.enabled %}state-enabled{% else %}state-disabled{% endif %}">{% if integration.enabled %}Enabled read-only{% else %}Disabled{% endif %}</span>
+                {% if integration.kind in ("RADARR", "SONARR") %}<span class="state-label state-{{ integration.management_mode|lower }}">{{ integration.management_mode|title }} · management {% if integration.active_management_enabled %}on{% else %}off{% endif %}</span>{% endif %}
+                {% if integration.kind == "QBITTORRENT" %}<span class="state-label state-protected">Active Management {% if integration.active_management_enabled %}on{% else %}off{% endif %}</span>{% endif %}
+              </div>
+              <div class="integration-actions">
+                <form method="post" action="/integrations/{{ integration.id }}/test">
+                  <input type="hidden" name="csrf" value="{{ csrf_token }}"><button class="button button-secondary" type="submit" aria-label="Test connection for {{ integration.name }}">Test connection</button>
+                </form>
+                <form method="post" action="/integrations/{{ integration.id }}/enabled">
+                  <input type="hidden" name="csrf" value="{{ csrf_token }}"><button class="button button-quiet compact-action" type="submit" aria-label="{% if integration.enabled %}Disable{% else %}Enable read-only{% endif %} {{ integration.name }}">{% if integration.enabled %}Disable{% else %}Enable read-only{% endif %}</button>
+                  {% if integration.enabled %}<small class="action-note">Disabling stops scheduled work, blocks execution, and invalidates queued approvals.</small>{% endif %}
+                </form>
+              </div>
+            </div>
+
+            <div class="health-detail">
+              {% if integration.last_success_at %}<span>Last success {{ integration.last_success_at.strftime('%Y-%m-%d %H:%M UTC') }}</span>{% else %}<span>No successful test yet</span>{% endif %}
+              {% if source %}<span class="{% if source_is_fresh(source) %}freshness-fresh{% else %}health-error{% endif %}">Inventory {{ 'fresh' if source_is_fresh(source) else source.status|lower|replace('_', ' ') }}{% if source.last_success_at %} · {{ source.last_success_at.strftime('%Y-%m-%d %H:%M UTC') }}{% endif %}</span>{% endif %}
+              {% if integration.sanitized_error %}<span class="health-error">{{ integration.sanitized_error }}</span>{% endif %}
+            </div>
+
+            {% if integration.kind in ("OVERSEERR", "PLEX", "TAUTULLI", "RADARR", "SONARR", "QBITTORRENT") %}
+            <details class="integration-detail">
+              <summary>Configure {{ integration.name }}</summary>
+              <div class="integration-controls">
+                <div class="control-group"><h4>Read-only operations</h4><p>Preview the next inventory pull before running an enabled connector on demand.</p>
+                  <div class="operation-buttons">
+                    <form method="post" action="/integrations/{{ integration.id }}/preview"><input type="hidden" name="csrf" value="{{ csrf_token }}"><button class="button button-secondary" type="submit" aria-label="Preview read-only inventory for {{ integration.name }}" {% if not integration.enabled %}disabled aria-describedby="preview-note-{{ integration.id }}"{% endif %}>Preview inventory</button></form>
+                    <form method="post" action="/integrations/{{ integration.id }}/sync"><input type="hidden" name="csrf" value="{{ csrf_token }}"><button class="button button-secondary" type="submit" aria-label="Synchronize read-only inventory for {{ integration.name }}" {% if not integration.enabled %}disabled aria-describedby="sync-note-{{ integration.id }}"{% endif %}>Sync now</button></form>
+                    {% if not integration.enabled %}<small id="preview-note-{{ integration.id }}">Enable read-only before previewing source records.</small><small id="sync-note-{{ integration.id }}">Enable read-only before saving inventory.</small>{% else %}<small>Preview fetches counts and saves no inventory.</small><small>Sync stores normalized read-only records and freshness.</small>{% endif %}
+                  </div>
+                </div>
+                {% if integration.kind == "OVERSEERR" %}
+                <div class="control-group"><h4>Arr discovery</h4><p>Read Radarr and Sonarr settings from Overseerr. Discovered services remain disabled and Protected.</p>
+                  <form method="post" action="/integrations/{{ integration.id }}/discover">
+                    <input type="hidden" name="csrf" value="{{ csrf_token }}"><button class="button button-secondary" type="submit" aria-label="Discover Arr services from {{ integration.name }}" {% if not integration.enabled %}disabled aria-describedby="discover-note-{{ integration.id }}"{% endif %}>Discover Arr services</button>
+                    {% if not integration.enabled %}<small class="action-note" id="discover-note-{{ integration.id }}">Enable read-only first.</small>{% endif %}
+                  </form>
+                </div>
+                {% endif %}
+
+                {% if integration.kind == "PLEX" %}
+                <div class="control-group"><h4>Library scope</h4><p>Discover libraries, then explicitly select only those this manager may inventory.</p>
+                  <form method="post" action="/integrations/{{ integration.id }}/libraries/discover">
+                    <input type="hidden" name="csrf" value="{{ csrf_token }}"><button class="button button-secondary" type="submit" {% if not integration.enabled %}disabled aria-describedby="plex-note-{{ integration.id }}"{% endif %}>Discover libraries</button>
+                    {% if not integration.enabled %}<small class="action-note" id="plex-note-{{ integration.id }}">Enable Plex read-only first.</small>{% endif %}
+                  </form>
+                  {% if libraries %}<div class="library-list" aria-label="Plex libraries"><p class="scope-safety">Changing scope never deletes content from Plex or its library paths.</p>
+                    {% for library in libraries %}<form method="post" action="/libraries/{{ library.id }}/enabled" class="library-row">
+                      <input type="hidden" name="csrf" value="{{ csrf_token }}"><span><strong>{{ library.name }}</strong><small>{{ library.media_type|title }} · section {{ library.external_id }}</small></span><button class="button button-quiet compact-action" type="submit">{% if library.enabled %}Remove from scope{% else %}Select library{% endif %}</button>
+                    </form>{% endfor %}
+                  </div>{% else %}<p class="empty-inline">No libraries discovered yet.</p>{% endif %}
+                </div>
+                {% endif %}
+
+                {% if integration.kind in ("RADARR", "SONARR") %}
+                <div class="control-group"><h4>Management mode</h4><p>Ignored excludes this instance. Protected inventories without proposals. Managed permits proposals, but never bypasses Active Management.</p>
+                  <form method="post" action="/integrations/{{ integration.id }}/management-mode" class="inline-form">
+                    <input type="hidden" name="csrf" value="{{ csrf_token }}">
+                    <label>Mode<select name="management_mode"><option value="IGNORED" {% if integration.management_mode == "IGNORED" %}selected{% endif %}>Ignored</option><option value="PROTECTED" {% if integration.management_mode == "PROTECTED" %}selected{% endif %}>Protected</option><option value="MANAGED" {% if integration.management_mode == "MANAGED" %}selected{% endif %}>Managed</option></select></label>
+                    <label class="confirmation-check"><input type="checkbox" name="confirm_permissive" value="yes">I confirm a more permissive mode when required.</label>
+                    <button class="button button-secondary" type="submit">Apply mode</button>
+                  </form>
+                </div>
+                {% endif %}
+
+                {% if integration.kind in ("RADARR", "SONARR", "QBITTORRENT") %}
+                <div class="control-group active-gate"><h4>Active Management</h4><p>This is the destructive-action gate. It is independent from connector enablement and management mode.</p>
+                  {% if integration.active_management_enabled %}
+                  <form method="post" action="/integrations/{{ integration.id }}/active-management">
+                    <input type="hidden" name="csrf" value="{{ csrf_token }}">
+                    <button class="button button-secondary" type="submit">Disable Active Management</button>
+                    <small class="gate-note">Disabling stops destructive execution before its next step and invalidates queued approvals.</small>
+                  </form>
+                  {% else %}<p class="empty-inline">Unavailable while the global rollout is Inventory Only. A later milestone will expose this control after dry-run validation and explicit owner approval.</p>{% endif %}
+                </div>
+                {% endif %}
+              </div>
+            </details>
+            {% endif %}
+          </article>
+          {% endfor %}
+        {% else %}
+          <div class="empty-state"><h3>No services connected</h3><p>Start with Overseerr to discover its Arr services, then add Plex, Tautulli, and qBittorrent.</p></div>
+        {% endif %}
+      </div>
+
+      <aside class="connection-panel" aria-labelledby="connect-title">
+        <h2 id="connect-title">Add a service</h2>
+        <p>Credentials are encrypted on disk and never shown again. New services are always disabled.</p>
+        <form method="post" action="/integrations" class="form-stack">
+          <input type="hidden" name="csrf" value="{{ csrf_token }}">
+          <label>Service<select name="kind" {% if errors.kind %}aria-invalid="true" aria-describedby="kind-error"{% endif %} required>
+            <option value="OVERSEERR" {% if form and form.kind == "OVERSEERR" %}selected{% endif %}>Overseerr 1.34</option><option value="PLEX" {% if form and form.kind == "PLEX" %}selected{% endif %}>Plex</option><option value="TAUTULLI" {% if form and form.kind == "TAUTULLI" %}selected{% endif %}>Tautulli</option><option value="RADARR" {% if form and form.kind == "RADARR" %}selected{% endif %}>Radarr</option><option value="SONARR" {% if form and form.kind == "SONARR" %}selected{% endif %}>Sonarr</option><option value="QBITTORRENT" {% if form and form.kind == "QBITTORRENT" %}selected{% endif %}>qBittorrent</option>
+          </select>{% if errors.kind %}<small class="field-error" id="kind-error">{{ errors.kind }}</small>{% endif %}</label>
+          <label>Display name<input name="name" value="{{ form.name if form else '' }}" placeholder="Living room Plex" maxlength="120" {% if errors.name %}aria-invalid="true" aria-describedby="name-error"{% endif %} required>{% if errors.name %}<small class="field-error" id="name-error">{{ errors.name }}</small>{% endif %}</label>
+          <label>Internal URL<input type="url" name="base_url" value="{{ form.base_url if form else '' }}" placeholder="http://192.168.1.20:32400" aria-describedby="base-url-help{% if errors.base_url %} base-url-error{% endif %}" {% if errors.base_url %}aria-invalid="true"{% endif %} required><small id="base-url-help">Include any configured base path.</small>{% if errors.base_url %}<small class="field-error" id="base-url-error">{{ errors.base_url }}</small>{% endif %}</label>
+          <label>API key or token<input type="password" name="api_key" autocomplete="off" aria-describedby="api-key-help{% if errors.api_key %} api-key-error{% endif %}" {% if errors.api_key %}aria-invalid="true"{% endif %}><small id="api-key-help">Required except for qBittorrent cookie login. qBittorrent API keys require v5.2+.</small>{% if errors.api_key %}<small class="field-error" id="api-key-error">{{ errors.api_key }}</small>{% endif %}</label>
+          <fieldset class="credential-alternative" {% if errors.credentials %}aria-describedby="credentials-error"{% endif %}><legend>qBittorrent cookie login alternative</legend><label>Username<input name="username" value="{{ form.username if form else '' }}" autocomplete="off"></label><label>Password<input type="password" name="password" autocomplete="off"></label>{% if errors.credentials %}<small class="field-error" id="credentials-error">{{ errors.credentials }}</small>{% endif %}</fieldset>
+          <button class="button button-primary" type="submit">Save disabled service</button>
+        </form>
+      </aside>
+    </section>
+  </main>
+</div>
+{% endblock %}

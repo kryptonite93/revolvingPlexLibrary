@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Create administrator · {{ app_name }}{% endblock %}
+{% block body %}
+<main class="auth-layout">
+  <section class="auth-intro" aria-labelledby="setup-title">
+    <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
+    <p class="product-name">{{ app_name }}</p>
+    <h1 id="setup-title">Start with control, not automation.</h1>
+    <p>Create the local administrator. Integrations and Active Management remain off until you explicitly enable them.</p>
+    <ul class="safety-list">
+      <li><span aria-hidden="true">✓</span>No media-directory mounts</li>
+      <li><span aria-hidden="true">✓</span>Inventory-only initial rollout</li>
+      <li><span aria-hidden="true">✓</span>Unknown state blocks deletion</li>
+    </ul>
+  </section>
+  <section class="auth-panel" aria-label="Administrator setup">
+    <div>
+      <p class="step-label">Setup · Administrator</p>
+      <h2>Create your account</h2>
+      <p class="supporting">Stored locally and protected with Argon2id.</p>
+    </div>
+    {% if errors %}
+    <div class="notice notice-error" id="setup-errors" role="alert">
+      <strong>Check these details</strong>
+      <ul>{% for error in errors.values() %}<li>{{ error }}</li>{% endfor %}</ul>
+    </div>
+    {% endif %}
+    <form method="post" action="/setup" class="form-stack">
+      <input type="hidden" name="csrf" value="{{ csrf_token }}">
+      <label>Username<input name="username" value="{{ username|default('') }}" autocomplete="username" minlength="3" {% if errors.username %}aria-invalid="true" aria-describedby="username-error"{% endif %} required autofocus>{% if errors.username %}<small class="field-error" id="username-error">{{ errors.username }}</small>{% endif %}</label>
+      <label>Password<input type="password" name="password" autocomplete="new-password" minlength="12" aria-describedby="password-help{% if errors.password %} password-error{% endif %}" {% if errors.password %}aria-invalid="true"{% endif %} required><small id="password-help">At least 12 characters</small>{% if errors.password %}<small class="field-error" id="password-error">{{ errors.password }}</small>{% endif %}</label>
+      <label>Confirm password<input type="password" name="password_confirm" autocomplete="new-password" minlength="12" {% if errors.password_confirm %}aria-invalid="true" aria-describedby="password-confirm-error"{% endif %} required>{% if errors.password_confirm %}<small class="field-error" id="password-confirm-error">{{ errors.password_confirm }}</small>{% endif %}</label>
+      <button type="submit" class="button button-primary">Create administrator</button>
+    </form>
+  </section>
+</main>
+{% endblock %}

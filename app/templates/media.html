@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Media · {{ app_name }}{% endblock %}
+{% block body %}
+<div class="app-shell">
+  {% set active_page = "media" %}{% include "_sidebar.html" %}
+  <main class="workspace media-workspace">
+    <header class="page-header media-header">
+      <div><h1>Media lifecycle</h1><p class="header-support">A read-only case file for every managed movie and season.</p></div>
+      <span class="status-pill"><span aria-hidden="true"></span>{{ fresh_count }}/{{ freshness|length }} SOURCES FRESH</span>
+    </header>
+
+    {% if message %}<div class="notice notice-success" role="status">{{ message }}</div>{% endif %}
+    {% if error %}<div class="notice notice-error" role="alert">{{ error }}</div>{% endif %}
+
+    <section class="source-ribbon" aria-labelledby="source-state-title">
+      <div><h2 id="source-state-title">Evidence clock</h2><p>Unknown or stale source data blocks a future deletion decision.</p></div>
+      <div class="source-cues">
+        {% for source in freshness %}
+        <div class="source-cue {% if source_is_fresh(source) %}is-fresh{% else %}is-stale{% endif %}">
+          <strong>{{ 'qBittorrent' if source.source_kind == 'QBITTORRENT' else source.source_kind|title }}</strong>
+          <span>{{ 'Fresh' if source_is_fresh(source) else source.status|replace('_', ' ')|title }}</span>
+          <small>{% if source.last_success_at %}{{ source.last_success_at.strftime('%Y-%m-%d %H:%M UTC') }}{% else %}Never synchronized{% endif %}</small>
+        </div>
+        {% else %}
+        <p class="empty-inline">No inventory source has synchronized yet.</p>
+        {% endfor %}
+      </div>
+    </section>
+
+    <details class="policy-drawer">
+      <summary>Inventory policy and freshness thresholds</summary>
+      <form method="post" action="/media/policy" class="policy-form">
+        <input type="hidden" name="csrf" value="{{ csrf_token }}">
+        <fieldset><legend>Meaningful playback</legend><label>Minimum minutes<input type="number" name="meaningful_minutes" min="1" max="1440" value="{{ policy.meaningful_minutes }}" required></label><label>Minimum percent<input type="number" name="meaningful_percent" min="1" max="100" value="{{ policy.meaningful_percent }}" required></label></fieldset>
+        <fieldset><legend>Retention</legend><label>Never watched · weeks<input type="number" name="never_watched_weeks" min="1" max="520" value="{{ policy.never_watched_weeks }}" required></label><label>After meaningful watch · weeks<input type="number" name="watched_weeks" min="1" max="520" value="{{ policy.watched_weeks }}" required></label><label class="wide-field">Protected Arr tag<input name="protected_tag_name" maxlength="120" value="{{ policy.protected_tag_name }}" required></label></fieldset>
+        <fieldset class="freshness-fields"><legend>Freshness windows · minutes</legend><label>Tautulli<input type="number" name="tautulli_fresh_minutes" min="1" value="{{ policy.tautulli_fresh_minutes }}" required></label><label>qBittorrent<input type="number" name="torrent_fresh_minutes" min="1" value="{{ policy.torrent_fresh_minutes }}" required></label><label>Arr<input type="number" name="arr_fresh_minutes" min="1" value="{{ policy.arr_fresh_minutes }}" required></label><label>Overseerr<input type="number" name="overseerr_fresh_minutes" min="1" value="{{ policy.overseerr_fresh_minutes }}" required></label><label>Plex<input type="number" name="plex_fresh_minutes" min="1" value="{{ policy.plex_fresh_minutes }}" required></label></fieldset>
+        <div class="policy-save"><p>Saving recalculates decisions from stored evidence. It does not call any external mutation API.</p><button class="button button-primary" type="submit">Save inventory policy</button></div>
+      </form>
+    </details>
+
+    <section class="lifecycle-workbench" aria-labelledby="workbench-title">
+      <div class="workbench-heading"><div><h2 id="workbench-title">Decision workbench</h2><p>{{ rows|length }} managed {{ 'item' if rows|length == 1 else 'items' }}, ordered by retention deadline.</p></div><a class="button button-secondary" href="/integrations">Sync sources</a></div>
+      {% if rows %}
+      <div class="lifecycle-list">
+        {% for row in rows %}
+        {% set item = row.lifecycle %}
+        <article class="lifecycle-row">
+          <a class="lifecycle-main" href="/media/{{ item.id }}" aria-label="Open lifecycle case file for {{ row.identity.canonical_title }}">
+            <span class="media-spine media-spine-{{ row.identity.media_type|lower }}" aria-hidden="true">{{ 'M' if row.identity.media_type == 'MOVIE' else 'S' ~ (row.identity.season_number or 0) }}</span>
+            <span class="lifecycle-title"><strong>{{ row.identity.canonical_title }}</strong><small>{{ row.integration.name }} · {{ row.identity.media_type|title }}{% if row.identity.year %} · {{ row.identity.year }}{% endif %}</small></span>
+          </a>
+          <div class="lifecycle-track" aria-label="Lifecycle evidence">
+            <div class="track-segment"><span>Imported</span><strong>{% if item.first_imported_at %}{{ item.first_imported_at.strftime('%Y-%m-%d') }}{% else %}Unknown{% endif %}</strong></div>
+            <div class="track-segment"><span>Last meaningful watch</span><strong>{% if item.last_meaningful_watch_at %}{{ item.last_meaningful_watch_at.strftime('%Y-%m-%d') }}{% else %}Never observed{% endif %}</strong></div>
+            <div class="track-segment"><span>Retention deadline</span><strong>{% if item.retention_deadline %}{{ item.retention_deadline.strftime('%Y-%m-%d') }}{% else %}Blocked{% endif %}</strong></div>
+          </div>
+          <div class="lifecycle-verdict">
+            <span class="decision-label decision-{{ item.decision|lower }}">{{ item.decision|replace('_', ' ')|title }}</span>
+            <small>{{ item.protection_state|title }} · {{ row.torrent_count }} torrent {{ 'mapping' if row.torrent_count == 1 else 'mappings' }}</small>
+          </div>
+        </article>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="empty-state media-empty"><h3>The workbench is ready for evidence</h3><p>Enable and synchronize Radarr or Sonarr to create lifecycle case files. Nothing is inferred from folder names alone.</p><a class="button button-primary" href="/integrations">Open integrations</a></div>
+      {% endif %}
+    </section>
+  </main>
+</div>
+{% endblock %}

@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}{{ identity.canonical_title }} · {{ app_name }}{% endblock %}
+{% block body %}
+<div class="app-shell">
+  {% set active_page = "media" %}{% include "_sidebar.html" %}
+  <main class="workspace media-detail-workspace">
+    <a class="back-link" href="/media">Back to lifecycle workbench</a>
+    <header class="case-header">
+      <div class="case-title"><span class="media-spine media-spine-{{ identity.media_type|lower }}" aria-hidden="true">{{ 'M' if identity.media_type == 'MOVIE' else 'S' ~ (identity.season_number or 0) }}</span><div><h1>{{ identity.canonical_title }}</h1><p>{{ integration.name }} · {{ identity.media_type|title }}{% if identity.year %} · {{ identity.year }}{% endif %}</p></div></div>
+      <div class="case-verdict"><span class="decision-label decision-{{ lifecycle.decision|lower }}">{{ lifecycle.decision|replace('_', ' ')|title }}</span><p>{{ lifecycle.decision_reason }}</p></div>
+    </header>
+
+    <section class="case-timeline" aria-label="Lifecycle timeline">
+      <div><span>Original import</span><strong>{% if lifecycle.first_imported_at %}{{ lifecycle.first_imported_at.strftime('%Y-%m-%d %H:%M UTC') }}{% else %}Unknown — blocks eligibility{% endif %}</strong></div>
+      <div><span>Last meaningful watch</span><strong>{% if lifecycle.last_meaningful_watch_at %}{{ lifecycle.last_meaningful_watch_at.strftime('%Y-%m-%d %H:%M UTC') }}{% else %}No mapped playback observed{% endif %}</strong></div>
+      <div><span>Retention deadline</span><strong>{% if lifecycle.retention_deadline %}{{ lifecycle.retention_deadline.strftime('%Y-%m-%d %H:%M UTC') }}{% else %}Not calculable{% endif %}</strong></div>
+      <div><span>Protection</span><strong>{{ lifecycle.protection_state|title }}{% if lifecycle.protection_sources %} · {{ lifecycle.protection_sources|join(', ')|replace('_', ' ')|title }}{% endif %}</strong></div>
+    </section>
+
+    <div class="case-columns">
+      <section class="evidence-section"><div class="section-heading"><h2>Files and revisions</h2><p>{{ files|length }} observed</p></div>
+        <div class="evidence-list">{% for file in files %}<div><strong>{{ file.path or 'Path unavailable' }}</strong><span>{% if file.imported_at %}Imported {{ file.imported_at.strftime('%Y-%m-%d') }}{% else %}Import time unknown{% endif %} · {{ file.quality or 'Quality unknown' }} · {{ ((file.size or 0) / 1073741824)|round(2) }} GiB</span></div>{% else %}<p class="empty-inline">No file revision was returned by the Arr source.</p>{% endfor %}</div>
+      </section>
+      <section class="evidence-section"><div class="section-heading"><h2>Torrent mapping</h2><p>{{ mapped|length }} matched</p></div>
+        <div class="evidence-list">{% for mapping, torrent in mapped %}<div><strong>{{ torrent.name }}</strong><span>{{ mapping.mapping_source|replace('_', ' ')|title }} · {{ mapping.confidence|title }} confidence · {{ torrent.state or 'state unknown' }} · ratio {{ torrent.ratio|round(2) if torrent.ratio is not none else 'unknown' }}</span><small>{% for tracker in trackers_by_torrent.get(torrent.id, []) %}{{ tracker.host }} · status {{ tracker.status if tracker.status is not none else 'unknown' }}{% if tracker.message %} · {{ tracker.message }}{% endif %}{% if not loop.last %}<br>{% endif %}{% else %}No tracker metadata{% endfor %}</small></div>{% else %}<p class="empty-inline">No exact download ID or high-confidence content-path match.</p>{% endfor %}</div>
+      </section>
+      <section class="evidence-section"><div class="section-heading"><h2>Playback evidence</h2><p>{{ playbacks|length }} meaningful</p></div>
+        <div class="evidence-list">{% for playback in playbacks %}<div><strong>{{ playback.watched_at.strftime('%Y-%m-%d %H:%M UTC') }}</strong><span>{{ (playback.duration_seconds / 60)|round|int }} minutes · {{ playback.progress_percent|round|int }}%{% if playback.watched %} · watched{% endif %}</span></div>{% else %}<p class="empty-inline">No playback can be mapped to this lifecycle yet. The decision remains fail-closed when required.</p>{% endfor %}</div>
+      </section>
+      <section class="evidence-section"><div class="section-heading"><h2>Request protection</h2><p>{{ requests|length }} active</p></div>
+        <div class="evidence-list">{% for item in requests %}<div><strong>Request {{ item.external_request_id }}</strong><span>{{ item.status|title }} · requester {{ item.requester_id or 'unknown' }}{% if item.requested_at %} · {{ item.requested_at.strftime('%Y-%m-%d') }}{% endif %}</span></div>{% else %}<p class="empty-inline">No current Overseerr request mapped by provider ID.</p>{% endfor %}</div>
+      </section>
+    </div>
+
+    <section class="freshness-ledger"><div class="section-heading"><h2>Source freshness</h2><p>All enabled evidence must be current</p></div>
+      <div>{% for source in freshness %}<span class="freshness-entry"><strong>{{ 'qBittorrent' if source.source_kind == 'QBITTORRENT' else source.source_kind|title }}</strong><em class="{% if source_is_fresh(source) %}freshness-fresh{% else %}health-error{% endif %}">{{ 'Fresh' if source_is_fresh(source) else source.status|replace('_', ' ')|title }}</em><small>{% if source.last_success_at %}{{ source.last_success_at.strftime('%Y-%m-%d %H:%M UTC') }}{% else %}Never synchronized{% endif %}</small></span>{% else %}<p class="empty-inline">No source freshness records.</p>{% endfor %}</div>
+    </section>
+  </main>
+</div>
+{% endblock %}

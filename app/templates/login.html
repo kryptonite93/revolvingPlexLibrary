@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Sign in · {{ app_name }}{% endblock %}
+{% block body %}
+<main class="auth-layout">
+  <section class="auth-intro" aria-labelledby="login-title">
+    <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
+    <p class="product-name">{{ app_name }}</p>
+    <h1 id="login-title">Your library’s lifecycle, in one place.</h1>
+    <p>Review playback, protection, tracker obligations, and every decision before automation is allowed to act.</p>
+  </section>
+  <section class="auth-panel" aria-label="Sign in">
+    <div>
+      <p class="step-label">Local administrator</p>
+      <h2>Welcome back</h2>
+      <p class="supporting">Sign in to inspect the current rollout state.</p>
+    </div>
+    {% if error %}<div class="notice notice-error" id="login-error" role="alert">{{ error }}</div>{% endif %}
+    <form method="post" action="/login" class="form-stack">
+      <input type="hidden" name="csrf" value="{{ csrf_token }}">
+      <label>Username<input name="username" value="{{ username|default('') }}" autocomplete="username" {% if error %}aria-invalid="true" aria-describedby="login-error"{% endif %} required autofocus></label>
+      <label>Password<input type="password" name="password" autocomplete="current-password" {% if error %}aria-invalid="true" aria-describedby="login-error"{% endif %} required></label>
+      <button type="submit" class="button button-primary">Sign in</button>
+    </form>
+  </section>
+</main>
+{% endblock %}

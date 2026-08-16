@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>Revolving-Plex-Manager</Name>
+  <Repository>ghcr.io/kryptonite93/revolving-plex-manager:latest</Repository>
+  <Registry>https://github.com/kryptonite93/revolvingPlexLibrary/pkgs/container/revolving-plex-manager</Registry>
+  <Network>bridge</Network>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/kryptonite93/revolvingPlexLibrary/issues</Support>
+  <Project>https://github.com/kryptonite93/revolvingPlexLibrary</Project>
+  <Overview>Safety-first, playback-aware and seed-aware lifecycle management for a revolving Plex library. Integrations and Active Management default to off.</Overview>
+  <Category>MediaApp:Other Tools:System</Category>
+  <WebUI>http://[IP]:[PORT:8787]/</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/kryptonite93/revolvingPlexLibrary/main/unraid/revolving-plex-manager.xml</TemplateURL>
+  <Icon/>
+  <ExtraParams>--read-only --tmpfs /tmp:rw,noexec,nosuid,size=64m</ExtraParams>
+  <PostArgs/>
+  <CPUset/>
+  <DateInstalled/>
+  <DonateText/>
+  <DonateLink/>
+  <Requires>/config must be local or cache-backed appdata. Do not place the SQLite database on SMB or NFS. This container does not require media-directory mounts.</Requires>
+  <Config Name="Web UI" Target="8787" Default="8787" Mode="tcp" Description="Host port for the administrative Web UI." Type="Port" Display="always" Required="true" Mask="false">8787</Config>
+  <Config Name="Application Data" Target="/config" Default="/mnt/user/appdata/revolving-plex-manager" Mode="rw" Description="Persistent SQLite database, encryption material, backups, and logs. Prefer a cache-only appdata share." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/revolving-plex-manager</Config>
+  <Config Name="Timezone" Target="TZ" Default="America/Toronto" Mode="" Description="Timezone used when rendering UTC timestamps." Type="Variable" Display="always" Required="true" Mask="false">America/Toronto</Config>
+  <Config Name="Secure Cookies" Target="SECURE_COOKIES" Default="false" Mode="" Description="Set true when the Web UI is served through HTTPS. Direct local HTTP requires false." Type="Variable" Display="advanced" Required="true" Mask="false">false</Config>
+  <Config Name="Application Secret" Target="APP_SECRET" Default="" Mode="" Description="Optional persistent session-signing secret. When empty, a secret is generated under /config." Type="Variable" Display="advanced-hide" Required="false" Mask="true"/>
+</Container>
