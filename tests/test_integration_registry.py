@@ -258,7 +258,7 @@ def test_managed_mode_requires_explicit_confirmation(client: TestClient, app) ->
         data={"management_mode": "MANAGED", "csrf": csrf_from(page)},
         follow_redirects=True,
     )
-    assert "Confirm more permissive" in response.text
+    assert "Confirm mode change" in response.text
     page = client.get("/integrations")
     client.post(
         f"/integrations/{integration_id}/management-mode",

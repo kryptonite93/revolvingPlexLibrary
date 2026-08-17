@@ -10,6 +10,9 @@ from app.integrations.urls import normalize_base_url
 
 
 class ArrAdapter:
+    _MOVIE_FILE_BATCH_SIZE = 100
+    _HISTORY_PAGE_SIZE = 10000
+
     def __init__(
         self,
         base_url: str,
@@ -49,18 +52,52 @@ class ArrAdapter:
             response.raise_for_status()
             return response.json()
 
+    def _movie_files(self, movies: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        movie_ids = [int(item["id"]) for item in movies if item.get("id") is not None]
+        files: list[dict[str, Any]] = []
+        for start in range(0, len(movie_ids), self._MOVIE_FILE_BATCH_SIZE):
+            payload = self.get_json(
+                "/api/v3/moviefile",
+                {"movieId": movie_ids[start : start + self._MOVIE_FILE_BATCH_SIZE]},
+            )
+            if not isinstance(payload, list):
+                raise ValueError("Radarr returned invalid movie-file data")
+            files.extend(item for item in payload if isinstance(item, dict))
+        return files
+
+    def _history(self) -> list[dict[str, Any]]:
+        records: list[dict[str, Any]] = []
+        page = 1
+        while True:
+            payload = self.get_json(
+                "/api/v3/history",
+                {
+                    "page": page,
+                    "pageSize": self._HISTORY_PAGE_SIZE,
+                    "sortKey": "date",
+                    "sortDirection": "descending",
+                },
+            )
+            if not isinstance(payload, dict):
+                raise ValueError("Arr returned invalid history data")
+            batch = payload.get("records", [])
+            if not isinstance(batch, list):
+                raise ValueError("Arr returned invalid history records")
+            records.extend(item for item in batch if isinstance(item, dict))
+            total_records = int(payload.get("totalRecords") or len(records))
+            if not batch or len(records) >= total_records:
+                return records
+            page += 1
+
     def inventory(self, kind: str) -> dict[str, Any]:
-        history_params = {
-            "page": 1,
-            "pageSize": 10000,
-            "sortKey": "date",
-            "sortDirection": "descending",
-        }
         if kind == "RADARR":
+            movies = self.get_json("/api/v3/movie")
+            if not isinstance(movies, list):
+                raise ValueError("Radarr returned invalid movie data")
             return {
-                "items": self.get_json("/api/v3/movie"),
-                "files": self.get_json("/api/v3/moviefile"),
-                "history": self.get_json("/api/v3/history", history_params),
+                "items": movies,
+                "files": self._movie_files(movies),
+                "history": self._history(),
                 "tags": self.get_json("/api/v3/tag"),
             }
         if kind == "SONARR":
@@ -80,7 +117,7 @@ class ArrAdapter:
                 "items": series,
                 "files": files,
                 "episodes": episodes,
-                "history": self.get_json("/api/v3/history", history_params),
+                "history": self._history(),
                 "tags": self.get_json("/api/v3/tag"),
             }
         raise ValueError("Arr inventory kind must be RADARR or SONARR")

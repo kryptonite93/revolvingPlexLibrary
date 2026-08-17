@@ -23,7 +23,7 @@ def integration(kind: str, mode: str | None = None) -> IntegrationInstance:
 
 def test_more_permissive_arr_mode_requires_confirmation() -> None:
     instance = integration("RADARR", "PROTECTED")
-    with pytest.raises(ValueError, match="Confirm more permissive"):
+    with pytest.raises(ValueError, match="Confirm mode change"):
         change_management_mode(instance, "MANAGED", confirmed=False)
     assert instance.management_mode == "PROTECTED"
     change_management_mode(instance, "MANAGED", confirmed=True)

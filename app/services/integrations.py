@@ -300,7 +300,7 @@ def change_management_mode(
         raise ValueError("Invalid management mode")
     previous = integration.management_mode or "PROTECTED"
     if _MODE_RANK[normalized_target] > _MODE_RANK[previous] and not confirmed:
-        raise ValueError("Confirm more permissive management before applying this mode")
+        raise ValueError("Confirm mode change before applying this mode")
     integration.management_mode = normalized_target
     if normalized_target != "MANAGED":
         integration.active_management_enabled = False

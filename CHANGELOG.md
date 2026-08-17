@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Fixed Radarr inventory by scoping movie-file requests and paginating complete Arr history.
+- Reduced SQLite contention by completing remote inventory fetches before opening write transactions.
+- Clarified the management-mode confirmation copy.
 - Added integration editing and typed-confirmation local removal without sending delete commands to connected services.
 - Fixed Unraid startup by running the container as the standard appdata owner (`99:100`).
 - Reduced the local administrator password minimum from 12 characters to 8.

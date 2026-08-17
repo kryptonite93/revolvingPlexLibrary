@@ -78,10 +78,26 @@ def retention_deadline(
     return None
 
 
+def _default_inventory_policy() -> InventoryPolicy:
+    return InventoryPolicy(
+        id="default",
+        meaningful_minutes=10,
+        meaningful_percent=10,
+        never_watched_weeks=16,
+        watched_weeks=8,
+        protected_tag_name="retention-protected",
+        tautulli_fresh_minutes=15,
+        torrent_fresh_minutes=15,
+        arr_fresh_minutes=60,
+        overseerr_fresh_minutes=60,
+        plex_fresh_minutes=60,
+    )
+
+
 def get_inventory_policy(session: Session) -> InventoryPolicy:
     policy = session.get(InventoryPolicy, "default")
     if policy is None:
-        policy = InventoryPolicy(id="default")
+        policy = _default_inventory_policy()
         session.add(policy)
         session.flush()
     return policy
@@ -117,6 +133,8 @@ def _freshness(
 
 
 def _history_records(payload: Any) -> list[dict[str, Any]]:
+    if isinstance(payload, list):
+        return [item for item in payload if isinstance(item, dict)]
     if isinstance(payload, dict):
         records = payload.get("records", [])
         return records if isinstance(records, list) else []
@@ -272,8 +290,12 @@ def sync_arr(
     integration: IntegrationInstance,
     credentials: dict[str, str],
     policy: InventoryPolicy,
+    payload: dict[str, Any] | None = None,
 ) -> dict[str, int]:
-    payload = ArrAdapter(integration.base_url, credentials["api_key"]).inventory(integration.kind)
+    if payload is None:
+        payload = ArrAdapter(integration.base_url, credentials["api_key"]).inventory(
+            integration.kind
+        )
     items = payload.get("items", []) if isinstance(payload.get("items"), list) else []
     files = payload.get("files", []) if isinstance(payload.get("files"), list) else []
     episodes = payload.get("episodes", []) if isinstance(payload.get("episodes"), list) else []
@@ -416,6 +438,28 @@ def sync_arr(
     return {"lifecycles": lifecycle_count, "file_revisions": file_count}
 
 
+def fetch_tautulli_history(
+    integration: IntegrationInstance,
+    credentials: dict[str, str],
+    *,
+    start_offset: int = 0,
+) -> tuple[list[dict[str, Any]], int]:
+    adapter = TautulliAdapter(integration.base_url, credentials["api_key"])
+    start = start_offset
+    records: list[dict[str, Any]] = []
+    while True:
+        payload = adapter.history(start=start, length=1000)
+        rows = payload.get("data", []) if isinstance(payload, dict) else []
+        if not isinstance(rows, list):
+            raise ValueError("Tautulli returned invalid history data")
+        records.extend(item for item in rows if isinstance(item, dict))
+        records_total = int(payload.get("recordsTotal") or len(rows))
+        start += len(rows)
+        if not rows or start >= records_total:
+            break
+    return records, start
+
+
 def sync_tautulli(
     session: Session,
     integration: IntegrationInstance,
@@ -423,58 +467,53 @@ def sync_tautulli(
     policy: InventoryPolicy,
     *,
     start_offset: int = 0,
+    fetched_history: tuple[list[dict[str, Any]], int] | None = None,
 ) -> dict[str, int]:
-    adapter = TautulliAdapter(integration.base_url, credentials["api_key"])
-    start = start_offset
+    rows, final_offset = fetched_history or fetch_tautulli_history(
+        integration,
+        credentials,
+        start_offset=start_offset,
+    )
     count = 0
-    while True:
-        payload = adapter.history(start=start, length=1000)
-        rows = payload.get("data", []) if isinstance(payload, dict) else []
-        if not isinstance(rows, list):
-            raise ValueError("Tautulli returned invalid history data")
-        for row in rows:
-            external_id = str(row.get("row_id") or row.get("id") or "")
-            if not external_id:
-                continue
-            playback = session.scalar(
-                select(Playback).where(
-                    Playback.integration_id == integration.id,
-                    Playback.external_row_id == external_id,
-                )
+    for row in rows:
+        external_id = str(row.get("row_id") or row.get("id") or "")
+        if not external_id:
+            continue
+        playback = session.scalar(
+            select(Playback).where(
+                Playback.integration_id == integration.id,
+                Playback.external_row_id == external_id,
             )
-            if playback is None:
-                playback = Playback(integration_id=integration.id, external_row_id=external_id)
-                session.add(playback)
-            duration = int(
-                row.get("play_duration")
-                or max(0, int(row.get("stopped") or 0) - int(row.get("started") or 0))
-            )
-            media_duration = int(row.get("duration") or 0) / 1000
-            progress = min(100.0, duration / media_duration * 100) if media_duration else 0.0
-            watched = bool(row.get("watched_status") or row.get("watched"))
-            playback.plex_rating_key = str(row.get("rating_key") or "") or None
-            playback.parent_rating_key = str(row.get("parent_rating_key") or "") or None
-            playback.grandparent_rating_key = str(row.get("grandparent_rating_key") or "") or None
-            playback.media_type = str(row.get("media_type") or "unknown")
-            playback.watched_at = parse_datetime(row.get("date") or row.get("started")) or utc_now()
-            playback.duration_seconds = duration
-            playback.progress_percent = progress
-            playback.watched = watched
-            playback.meaningful = meaningful_playback(
-                duration,
-                progress,
-                watched,
-                minutes=policy.meaningful_minutes,
-                percent=policy.meaningful_percent,
-            )
-            playback.user_id = str(row.get("user_id") or "") or None
-            count += 1
-        records_total = int(payload.get("recordsTotal") or len(rows))
-        start += len(rows)
-        if not rows or start >= records_total:
-            break
+        )
+        if playback is None:
+            playback = Playback(integration_id=integration.id, external_row_id=external_id)
+            session.add(playback)
+        duration = int(
+            row.get("play_duration")
+            or max(0, int(row.get("stopped") or 0) - int(row.get("started") or 0))
+        )
+        media_duration = int(row.get("duration") or 0) / 1000
+        progress = min(100.0, duration / media_duration * 100) if media_duration else 0.0
+        watched = bool(row.get("watched_status") or row.get("watched"))
+        playback.plex_rating_key = str(row.get("rating_key") or "") or None
+        playback.parent_rating_key = str(row.get("parent_rating_key") or "") or None
+        playback.grandparent_rating_key = str(row.get("grandparent_rating_key") or "") or None
+        playback.media_type = str(row.get("media_type") or "unknown")
+        playback.watched_at = parse_datetime(row.get("date") or row.get("started")) or utc_now()
+        playback.duration_seconds = duration
+        playback.progress_percent = progress
+        playback.watched = watched
+        playback.meaningful = meaningful_playback(
+            duration,
+            progress,
+            watched,
+            minutes=policy.meaningful_minutes,
+            percent=policy.meaningful_percent,
+        )
+        playback.user_id = str(row.get("user_id") or "") or None
+        count += 1
     _apply_playback(session, policy)
-    return {"playbacks": count, "cursor": start}
+    return {"playbacks": count, "cursor": final_offset}
 
 
 def _apply_playback(session: Session, policy: InventoryPolicy) -> None:
@@ -525,9 +564,16 @@ def _apply_playback(session: Session, policy: InventoryPolicy) -> None:
 
 
 def sync_overseerr(
-    session: Session, integration: IntegrationInstance, credentials: dict[str, str]
+    session: Session,
+    integration: IntegrationInstance,
+    credentials: dict[str, str],
+    rows: list[dict[str, Any]] | None = None,
 ) -> dict[str, int]:
-    rows = OverseerrAdapter(integration.base_url, credentials["api_key"]).requests()
+    rows = (
+        rows
+        if rows is not None
+        else OverseerrAdapter(integration.base_url, credentials["api_key"]).requests()
+    )
     session.query(RequestRecord).filter(RequestRecord.integration_id == integration.id).update(
         {"present": False}
     )
@@ -570,12 +616,11 @@ def _provider_id(guids: Any, provider: str) -> int | None:
     return None
 
 
-def sync_plex(
+def fetch_plex_inventory(
     session: Session,
     integration: IntegrationInstance,
     credentials: dict[str, str],
-    policy: InventoryPolicy,
-) -> dict[str, int]:
+) -> list[tuple[ManagedLibrary, list[dict[str, Any]]]]:
     libraries = session.scalars(
         select(ManagedLibrary).where(
             ManagedLibrary.plex_integration_id == integration.id,
@@ -583,10 +628,27 @@ def sync_plex(
         )
     ).all()
     adapter = PlexAdapter(integration.base_url, credentials["api_key"])
+    return [
+        (library, adapter.library_items(library.external_id, library.media_type))
+        for library in libraries
+    ]
+
+
+def sync_plex(
+    session: Session,
+    integration: IntegrationInstance,
+    credentials: dict[str, str],
+    policy: InventoryPolicy,
+    library_payloads: list[tuple[ManagedLibrary, list[dict[str, Any]]]] | None = None,
+) -> dict[str, int]:
+    library_payloads = (
+        library_payloads
+        if library_payloads is not None
+        else fetch_plex_inventory(session, integration, credentials)
+    )
     item_count = 0
     mapped_count = 0
-    for library in libraries:
-        items = adapter.library_items(library.external_id, library.media_type)
+    for library, items in library_payloads:
         item_count += len(items)
         for item in items:
             rating_key = str(item.get("ratingKey") or "")
@@ -620,7 +682,7 @@ def sync_plex(
                 mapped_count += 1
     _apply_playback(session, policy)
     return {
-        "libraries": len(libraries),
+        "libraries": len(library_payloads),
         "plex_items": item_count,
         "mapped_lifecycles": mapped_count,
     }
@@ -667,9 +729,16 @@ def _apply_request_protection(session: Session) -> None:
 
 
 def sync_qbittorrent(
-    session: Session, integration: IntegrationInstance, credentials: dict[str, str]
+    session: Session,
+    integration: IntegrationInstance,
+    credentials: dict[str, str],
+    rows: list[dict[str, Any]] | None = None,
 ) -> dict[str, int]:
-    rows = QBittorrentAdapter(integration.base_url, credentials).inventory()
+    rows = (
+        rows
+        if rows is not None
+        else QBittorrentAdapter(integration.base_url, credentials).inventory()
+    )
     now = utc_now()
     session.query(Torrent).filter(Torrent.integration_id == integration.id).update(
         {"present": False}
@@ -762,36 +831,87 @@ def sync_integration(
 ) -> SyncRun:
     if not integration.enabled:
         raise ValueError("Enable the integration before syncing")
+
+    with session.no_autoflush:
+        existing_freshness = session.scalar(
+            select(SourceFreshness).where(
+                SourceFreshness.integration_id == integration.id,
+                SourceFreshness.source_kind == integration.kind,
+            )
+        )
+        credentials = cipher.decrypt(integration.credentials_encrypted)
+        try:
+            if integration.kind in {"RADARR", "SONARR"}:
+                fetched: Any = ArrAdapter(integration.base_url, credentials["api_key"]).inventory(
+                    integration.kind
+                )
+            elif integration.kind == "PLEX":
+                fetched = fetch_plex_inventory(session, integration, credentials)
+            elif integration.kind == "TAUTULLI":
+                try:
+                    start_offset = int(existing_freshness.cursor if existing_freshness else "0")
+                except ValueError:
+                    start_offset = 0
+                fetched = fetch_tautulli_history(
+                    integration,
+                    credentials,
+                    start_offset=start_offset,
+                )
+            elif integration.kind == "OVERSEERR":
+                fetched = OverseerrAdapter(integration.base_url, credentials["api_key"]).requests()
+            elif integration.kind == "QBITTORRENT":
+                fetched = QBittorrentAdapter(integration.base_url, credentials).inventory()
+            else:
+                raise ValueError("This integration does not provide read-only inventory")
+        except (httpx.HTTPError, ValueError, KeyError, TypeError) as error:
+            policy = get_inventory_policy(session)
+            freshness = _freshness(session, integration, policy)
+            message = str(redact(str(error)))[:1000] or "Read-only sync failed"
+            run = SyncRun(
+                integration_id=integration.id,
+                mode="FULL",
+                status="FAILED",
+                completed_at=utc_now(),
+                sanitized_error=message,
+            )
+            session.add(run)
+            freshness.last_attempt_at = utc_now()
+            freshness.status = "ERROR"
+            freshness.sanitized_error = message
+            return run
+
     policy = get_inventory_policy(session)
+    freshness = _freshness(session, integration, policy)
     run = SyncRun(integration_id=integration.id, mode="FULL", status="RUNNING")
     session.add(run)
-    freshness = _freshness(session, integration, policy)
     freshness.last_attempt_at = utc_now()
     freshness.status = "SYNCING"
     session.flush()
-    credentials = cipher.decrypt(integration.credentials_encrypted)
     inventory_savepoint = session.begin_nested()
     try:
         if integration.kind in {"RADARR", "SONARR"}:
-            counts = sync_arr(session, integration, credentials, policy)
+            counts = sync_arr(session, integration, credentials, policy, payload=fetched)
         elif integration.kind == "PLEX":
-            counts = sync_plex(session, integration, credentials, policy)
+            counts = sync_plex(
+                session,
+                integration,
+                credentials,
+                policy,
+                library_payloads=fetched,
+            )
         elif integration.kind == "TAUTULLI":
-            try:
-                start_offset = int(freshness.cursor or "0")
-            except ValueError:
-                start_offset = 0
             counts = sync_tautulli(
                 session,
                 integration,
                 credentials,
                 policy,
                 start_offset=start_offset,
+                fetched_history=fetched,
             )
         elif integration.kind == "OVERSEERR":
-            counts = sync_overseerr(session, integration, credentials)
+            counts = sync_overseerr(session, integration, credentials, rows=fetched)
         elif integration.kind == "QBITTORRENT":
-            counts = sync_qbittorrent(session, integration, credentials)
+            counts = sync_qbittorrent(session, integration, credentials, rows=fetched)
         else:
             raise ValueError("This integration does not provide read-only inventory")
     except (httpx.HTTPError, ValueError, KeyError, TypeError) as error:

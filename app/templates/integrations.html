@@ -92,7 +92,7 @@
                   <form method="post" action="/integrations/{{ integration.id }}/management-mode" class="inline-form">
                     <input type="hidden" name="csrf" value="{{ csrf_token }}">
                     <label>Mode<select name="management_mode"><option value="IGNORED" {% if integration.management_mode == "IGNORED" %}selected{% endif %}>Ignored</option><option value="PROTECTED" {% if integration.management_mode == "PROTECTED" %}selected{% endif %}>Protected</option><option value="MANAGED" {% if integration.management_mode == "MANAGED" %}selected{% endif %}>Managed</option></select></label>
-                    <label class="confirmation-check"><input type="checkbox" name="confirm_permissive" value="yes">I confirm a more permissive mode when required.</label>
+                    <label class="confirmation-check"><input type="checkbox" name="confirm_permissive" value="yes">Confirm mode change</label>
                     <button class="button button-secondary" type="submit">Apply mode</button>
                   </form>
                 </div>
