@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Fixed Unraid startup by running the container as the standard appdata owner (`99:100`).
+
 ## 0.1.0 - 2026-08-16
 
 - Added the safety-first application foundation and Unraid deployment template.

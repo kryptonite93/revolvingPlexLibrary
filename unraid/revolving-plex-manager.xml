@@ -13,7 +13,7 @@
   <WebUI>http://[IP]:[PORT:8787]/</WebUI>
   <TemplateURL>https://raw.githubusercontent.com/kryptonite93/revolvingPlexLibrary/main/unraid/revolving-plex-manager.xml</TemplateURL>
   <Icon/>
-  <ExtraParams>--read-only --tmpfs /tmp:rw,noexec,nosuid,size=64m</ExtraParams>
+  <ExtraParams>--user=99:100 --read-only --tmpfs /tmp:rw,noexec,nosuid,size=64m</ExtraParams>
   <PostArgs/>
   <CPUset/>
   <DateInstalled/>
