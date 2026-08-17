@@ -7,7 +7,7 @@
     <a class="back-link" href="/media">Back to lifecycle workbench</a>
     <header class="case-header">
       <div class="case-title"><span class="media-spine media-spine-{{ identity.media_type|lower }}" aria-hidden="true">{{ 'M' if identity.media_type == 'MOVIE' else 'S' ~ (identity.season_number or 0) }}</span><div><h1>{{ identity.canonical_title }}</h1><p>{{ integration.name }} · {{ identity.media_type|title }}{% if identity.year %} · {{ identity.year }}{% endif %}</p></div></div>
-      <div class="case-verdict">{% if lifecycle.state == "MISSING" %}<span class="decision-label decision-not-in-library">Not in library</span><p>No downloaded files are present. This item is excluded from retention and legacy bootstrap.</p>{% else %}<span class="decision-label decision-{{ lifecycle.decision|lower }}">{{ lifecycle.decision|replace('_', ' ')|title }}</span><p>{{ lifecycle.decision_reason }}</p>{% endif %}</div>
+      <div class="case-verdict">{% if lifecycle.state == "MISSING" %}<span class="decision-label decision-not-in-library">Not in library</span><p>No downloaded files are present. This item is excluded from retention and legacy bootstrap.</p>{% else %}<span class="decision-label decision-{{ lifecycle.decision|lower }}">{% if lifecycle.decision == "BLOCKED_STALE" %}Blocked · source data stale{% elif lifecycle.decision == "BLOCKED_UNKNOWN" %}Blocked · missing evidence{% else %}{{ lifecycle.decision|replace('_', ' ')|title }}{% endif %}</span><p>{{ lifecycle.decision_reason }}</p>{% endif %}</div>
     </header>
 
     <section class="case-timeline" aria-label="Lifecycle timeline">

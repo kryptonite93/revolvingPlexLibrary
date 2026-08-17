@@ -71,11 +71,11 @@ def retention_deadline(
     never_watched_weeks: int = 16,
     watched_weeks: int = 8,
 ) -> datetime | None:
-    if last_watch_at:
+    if first_imported_at is None:
+        return None
+    if last_watch_at and as_utc(last_watch_at) >= as_utc(first_imported_at):
         return last_watch_at + timedelta(weeks=watched_weeks)
-    if first_imported_at:
-        return first_imported_at + timedelta(weeks=never_watched_weeks)
-    return None
+    return first_imported_at + timedelta(weeks=never_watched_weeks)
 
 
 def _default_inventory_policy() -> InventoryPolicy:
@@ -188,16 +188,30 @@ def _item_protection(
     return state, sources
 
 
-def _set_decision(lifecycle: MediaLifecycle, *, all_required_sources_fresh: bool = False) -> None:
-    if lifecycle.protection_state == "PROTECTED":
+def _set_decision(
+    lifecycle: MediaLifecycle,
+    *,
+    all_required_sources_fresh: bool = False,
+    stale_sources: tuple[str, ...] = (),
+) -> None:
+    if lifecycle.state == "MISSING":
+        lifecycle.decision = "NOT_IN_LIBRARY"
+        lifecycle.decision_reason = "No downloaded files are present"
+    elif lifecycle.protection_state == "PROTECTED":
         lifecycle.decision = "KEEP_PROTECTED"
         lifecycle.decision_reason = "Protected by " + ", ".join(lifecycle.protection_sources)
     elif not all_required_sources_fresh:
         lifecycle.decision = "BLOCKED_STALE"
-        lifecycle.decision_reason = (
-            "Required playback, request, and torrent sources are not all fresh"
-        )
-    elif lifecycle.retention_deadline is None:
+        if stale_sources:
+            source_list = (
+                stale_sources[0]
+                if len(stale_sources) == 1
+                else f"{', '.join(stale_sources[:-1])} and {stale_sources[-1]}"
+            )
+            lifecycle.decision_reason = f"Waiting for fresh data from {source_list}"
+        else:
+            lifecycle.decision_reason = "No required evidence sources are fresh"
+    elif lifecycle.first_imported_at is None or lifecycle.retention_deadline is None:
         lifecycle.decision = "BLOCKED_UNKNOWN"
         lifecycle.decision_reason = "Original import date is unavailable"
     elif as_utc(lifecycle.retention_deadline) > utc_now():
@@ -541,7 +555,18 @@ def _apply_playback(session: Session, policy: InventoryPolicy) -> None:
                 | (Playback.parent_rating_key == lifecycle.plex_rating_key),
             )
         )
-    effective_watches = dict(direct_watches)
+    effective_watches: dict[str, datetime | None] = {}
+    for lifecycle, _identity_item in records:
+        direct = direct_watches[lifecycle.id]
+        imported_at = lifecycle.first_imported_at
+        effective_watches[lifecycle.id] = (
+            direct
+            if lifecycle.state == "ACTIVE"
+            and direct
+            and imported_at
+            and as_utc(direct) >= as_utc(imported_at)
+            else None
+        )
     series_groups: dict[int, list[tuple[MediaLifecycle, MediaIdentity]]] = {}
     for lifecycle, identity in records:
         if identity.media_type == "SEASON" and identity.series_tvdb_id is not None:
@@ -554,8 +579,16 @@ def _apply_playback(session: Session, policy: InventoryPolicy) -> None:
             direct = direct_watches.get(lifecycle.id)
             if direct and (latest_prior is None or as_utc(direct) > as_utc(latest_prior)):
                 latest_prior = direct
-            if lifecycle.state == "ACTIVE" and latest_prior:
+            imported_at = lifecycle.first_imported_at
+            if (
+                lifecycle.state == "ACTIVE"
+                and latest_prior
+                and imported_at
+                and as_utc(latest_prior) >= as_utc(imported_at)
+            ):
                 effective_watches[lifecycle.id] = latest_prior
+            elif direct is None:
+                effective_watches[lifecycle.id] = None
     for lifecycle, _identity_item in records:
         latest = effective_watches.get(lifecycle.id)
         lifecycle.last_meaningful_watch_at = latest
@@ -884,6 +917,7 @@ def sync_integration(
             freshness.last_attempt_at = utc_now()
             freshness.status = "ERROR"
             freshness.sanitized_error = message
+            recompute_decisions(session)
             return run
 
     policy = get_inventory_policy(session)
@@ -928,6 +962,7 @@ def sync_integration(
         run.sanitized_error = message
         freshness.status = "ERROR"
         freshness.sanitized_error = message
+        recompute_decisions(session)
         return run
     inventory_savepoint.commit()
     now = utc_now()
@@ -1004,18 +1039,27 @@ def recompute_decisions(session: Session) -> None:
     freshness_by_integration = {
         row.integration_id: row for row in session.scalars(select(SourceFreshness)).all()
     }
-    required_ids = [
-        item.id
+    required = [
+        item
         for item in enabled
         if item.kind in {"RADARR", "SONARR", "PLEX", "TAUTULLI", "OVERSEERR", "QBITTORRENT"}
         and item.management_mode != "IGNORED"
     ]
-    all_fresh = bool(required_ids) and all(
-        source_id in freshness_by_integration
-        and source_is_fresh(freshness_by_integration[source_id])
-        for source_id in required_ids
+    stale_sources = tuple(
+        item.name
+        for item in required
+        if item.id not in freshness_by_integration
+        or not source_is_fresh(freshness_by_integration[item.id])
     )
+    all_fresh = bool(required) and not stale_sources
     for lifecycle in session.scalars(select(MediaLifecycle)).all():
+        if (
+            lifecycle.first_imported_at
+            and lifecycle.last_meaningful_watch_at
+            and as_utc(lifecycle.last_meaningful_watch_at) < as_utc(lifecycle.first_imported_at)
+        ):
+            lifecycle.last_meaningful_watch_at = None
+            lifecycle.watched = False
         lifecycle.retention_deadline = retention_deadline(
             "",
             lifecycle.first_imported_at,
@@ -1023,4 +1067,8 @@ def recompute_decisions(session: Session) -> None:
             never_watched_weeks=policy.never_watched_weeks,
             watched_weeks=policy.watched_weeks,
         )
-        _set_decision(lifecycle, all_required_sources_fresh=all_fresh)
+        _set_decision(
+            lifecycle,
+            all_required_sources_fresh=all_fresh,
+            stale_sources=stale_sources,
+        )

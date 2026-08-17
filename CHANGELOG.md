@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Prevented missing media and pre-import television playback from producing removal-review deadlines.
+- Named the integrations whose stale data is blocking a lifecycle decision.
 - Grouped television seasons by series and added searchable, paginated Media filters.
 - Clarified missing and unmonitored media states throughout the lifecycle workbench.
 - Clarified that Tautulli synchronization reports newly imported playback rows.

@@ -938,7 +938,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "BLOCKED_STALE",
             "BLOCKED_UNKNOWN",
         }:
-            lifecycle_query = lifecycle_query.where(MediaLifecycle.decision == decision)
+            lifecycle_query = lifecycle_query.where(
+                MediaLifecycle.decision == decision,
+                MediaLifecycle.state == "ACTIVE",
+            )
         if watch_state == "WATCHED":
             lifecycle_query = lifecycle_query.where(MediaLifecycle.watched.is_(True))
         elif watch_state == "NEVER_WATCHED":
