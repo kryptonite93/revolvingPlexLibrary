@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Edit {{ integration.name }} · {{ app_name }}{% endblock %}
+{% block body %}
+{% set service_label = "qBittorrent" if integration.kind == "QBITTORRENT" else integration.kind|title %}
+<div class="app-shell">
+  {% set active_page = "integrations" %}{% include "_sidebar.html" %}
+  <main class="workspace integration-edit-workspace">
+    <header class="page-header">
+      <div><h1>Edit {{ service_label }} connection: {{ integration.name }}</h1><p class="header-support">Correct connection details without exposing the credential already on disk.</p></div>
+      <a class="button button-secondary" href="/integrations">Back to integrations</a>
+    </header>
+
+    {% if errors %}<div class="notice notice-error" role="alert"><strong>Check the highlighted field.</strong></div>{% endif %}
+
+    <div class="integration-edit-layout">
+      <section class="settings-panel" aria-labelledby="connection-settings-title">
+        <div class="section-heading"><div><h2 id="connection-settings-title">Connection settings</h2><p>Blank credential fields keep the currently stored credential.</p></div></div>
+        <form method="post" action="/integrations/{{ integration.id }}/edit" class="form-stack settings-form">
+          <input type="hidden" name="csrf" value="{{ csrf_token }}">
+          <label>Display name<input name="name" value="{{ form.name }}" maxlength="120" {% if errors.name %}aria-invalid="true" aria-describedby="name-error"{% endif %} required>{% if errors.name %}<small class="field-error" id="name-error">{{ errors.name }}</small>{% endif %}</label>
+          <label>Internal URL<input type="url" name="base_url" value="{{ form.base_url }}" aria-describedby="edit-base-url-help{% if errors.base_url %} edit-base-url-error{% endif %}" {% if errors.base_url %}aria-invalid="true"{% endif %} required><small id="edit-base-url-help">Include any configured base path. Changing the URL disables this integration until you test it again.</small>{% if errors.base_url %}<small class="field-error" id="edit-base-url-error">{{ errors.base_url }}</small>{% endif %}</label>
+
+          {% if integration.kind == "QBITTORRENT" %}
+          <label>New API key<input type="password" name="api_key" autocomplete="new-password" aria-describedby="edit-api-key-help"><small id="edit-api-key-help">Optional. Entering a value replaces cookie-login credentials.</small></label>
+          <fieldset class="credential-alternative" {% if errors.credentials %}aria-describedby="edit-credentials-error"{% endif %}>
+            <legend>Replace qBittorrent cookie login</legend>
+            <label>Username<input name="username" value="{{ form.username }}" autocomplete="off"></label>
+            <label>New password<input type="password" name="password" autocomplete="new-password"></label>
+            <small>Enter both fields to replace the stored login. Leave both blank to keep it.</small>
+            {% if errors.credentials %}<small class="field-error" id="edit-credentials-error">{{ errors.credentials }}</small>{% endif %}
+          </fieldset>
+          {% else %}
+          <label>New API key or token<input type="password" name="api_key" autocomplete="new-password" aria-describedby="edit-api-key-help{% if errors.credentials %} edit-credentials-error{% endif %}" {% if errors.credentials %}aria-invalid="true"{% endif %}><small id="edit-api-key-help">Leave blank to keep the stored credential.</small>{% if errors.credentials %}<small class="field-error" id="edit-credentials-error">{{ errors.credentials }}</small>{% endif %}</label>
+          {% endif %}
+
+          <div class="form-actions"><button class="button button-primary" type="submit">Save changes</button><a class="button button-quiet" href="/integrations">Cancel</a></div>
+          <p class="settings-safety">Changing the URL or credential automatically disables the integration and clears its previous health result. Test it before enabling read-only sync again.</p>
+        </form>
+      </section>
+
+      <aside class="danger-zone" aria-labelledby="remove-integration-title">
+        <h2 id="remove-integration-title">Remove local integration</h2>
+        <p>This changes only {{ app_name }}’s local configuration and inventory. It does not alter qBittorrent torrents, Arr records, Plex metadata, or files in any media library.</p>
+        <form method="post" action="/integrations/{{ integration.id }}/delete" class="form-stack">
+          <input type="hidden" name="csrf" value="{{ csrf_token }}">
+          <label><span>Type <strong>{{ integration.name }}</strong> to confirm</span><input name="confirm_name" autocomplete="off" {% if delete_error %}aria-invalid="true" aria-describedby="delete-error"{% endif %} required>{% if delete_error %}<small class="field-error" id="delete-error">{{ delete_error }}</small>{% endif %}</label>
+          <button class="button button-danger" type="submit">Remove local integration</button>
+        </form>
+      </aside>
+    </div>
+  </main>
+</div>
+{% endblock %}

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
 from app.integrations.arr import ArrAdapter
@@ -13,7 +13,19 @@ from app.integrations.plex import PlexAdapter
 from app.integrations.qbittorrent import QBittorrentAdapter
 from app.integrations.tautulli import TautulliAdapter
 from app.integrations.urls import normalize_base_url
-from app.persistence.models import IntegrationInstance, ManagedLibrary
+from app.persistence.models import (
+    IntegrationInstance,
+    ManagedLibrary,
+    MediaFileRevision,
+    MediaLifecycle,
+    Playback,
+    RequestRecord,
+    SourceFreshness,
+    SyncRun,
+    Torrent,
+    TorrentMediaMapping,
+    TorrentTracker,
+)
 from app.security.credentials import CredentialCipher
 from app.security.redaction import redact
 
@@ -79,6 +91,113 @@ def create_integration(
     session.add(integration)
     session.flush()
     return integration
+
+
+def update_integration(
+    session: Session,
+    cipher: CredentialCipher,
+    integration: IntegrationInstance,
+    *,
+    name: str,
+    base_url: str,
+    api_key: str = "",
+    username: str = "",
+    password: str = "",
+) -> bool:
+    normalized_url = normalize_base_url(base_url)
+    if not name.strip():
+        raise ValueError("Name is required")
+    duplicate = session.scalar(
+        select(IntegrationInstance).where(
+            IntegrationInstance.id != integration.id,
+            IntegrationInstance.kind == integration.kind,
+            IntegrationInstance.base_url == normalized_url,
+        )
+    )
+    if duplicate:
+        raise ValueError("An integration of this type already uses that URL")
+
+    credentials_replaced = False
+    credentials = cipher.decrypt(integration.credentials_encrypted)
+    if integration.kind == "QBITTORRENT":
+        if api_key.strip():
+            credentials = {"api_key": api_key.strip()}
+            credentials_replaced = True
+        elif username.strip() or password:
+            if not username.strip() or not password:
+                raise ValueError("qBittorrent requires both username and password")
+            credentials = {"username": username.strip(), "password": password}
+            credentials_replaced = True
+    elif api_key.strip():
+        credentials = {"api_key": api_key.strip()}
+        credentials_replaced = True
+
+    connection_changed = integration.base_url != normalized_url or credentials_replaced
+    integration.name = name.strip()
+    integration.base_url = normalized_url
+    if credentials_replaced:
+        integration.credentials_encrypted = cipher.encrypt(credentials)
+    if connection_changed:
+        integration.enabled = False
+        integration.active_management_enabled = False
+        integration.health_status = "UNTESTED"
+        integration.sanitized_error = None
+        integration.last_test_at = None
+        integration.last_success_at = None
+    return credentials_replaced
+
+
+def remove_integration_local_data(session: Session, integration: IntegrationInstance) -> None:
+    """Remove only this application's records; no connector adapter is called."""
+    integration_id = integration.id
+    session.execute(
+        update(IntegrationInstance)
+        .where(IntegrationInstance.discovered_from_instance_id == integration_id)
+        .values(discovered_from_instance_id=None)
+    )
+
+    library_ids = list(
+        session.scalars(
+            select(ManagedLibrary.id).where(ManagedLibrary.plex_integration_id == integration_id)
+        )
+    )
+    if library_ids:
+        session.execute(
+            update(MediaLifecycle)
+            .where(MediaLifecycle.library_id.in_(library_ids))
+            .values(library_id=None)
+        )
+
+    lifecycle_ids = list(
+        session.scalars(
+            select(MediaLifecycle.id).where(MediaLifecycle.integration_id == integration_id)
+        )
+    )
+    if lifecycle_ids:
+        session.execute(
+            delete(TorrentMediaMapping).where(TorrentMediaMapping.lifecycle_id.in_(lifecycle_ids))
+        )
+        session.execute(
+            delete(MediaFileRevision).where(MediaFileRevision.lifecycle_id.in_(lifecycle_ids))
+        )
+        session.execute(delete(MediaLifecycle).where(MediaLifecycle.id.in_(lifecycle_ids)))
+
+    torrent_ids = list(
+        session.scalars(select(Torrent.id).where(Torrent.integration_id == integration_id))
+    )
+    if torrent_ids:
+        session.execute(
+            delete(TorrentMediaMapping).where(TorrentMediaMapping.torrent_id.in_(torrent_ids))
+        )
+        session.execute(delete(TorrentTracker).where(TorrentTracker.torrent_id.in_(torrent_ids)))
+        session.execute(delete(Torrent).where(Torrent.id.in_(torrent_ids)))
+
+    for model in (Playback, RequestRecord, SyncRun, SourceFreshness):
+        session.execute(delete(model).where(model.integration_id == integration_id))
+    session.execute(
+        delete(ManagedLibrary).where(ManagedLibrary.plex_integration_id == integration_id)
+    )
+    session.delete(integration)
 
 
 def _adapter_for(

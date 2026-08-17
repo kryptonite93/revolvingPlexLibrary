@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from app.integrations.base import ConnectionTestResult
-from app.persistence.models import IntegrationInstance, ManagedLibrary
+from app.persistence.models import EventRecord, IntegrationInstance, ManagedLibrary, SourceFreshness
 
 
 def csrf_from(response) -> str:
@@ -135,6 +135,107 @@ def test_qbittorrent_cookie_credentials_are_encrypted(client: TestClient, app) -
         assert integration.active_management_enabled is False
         assert "cookie-password" not in integration.credentials_encrypted
     assert "cookie-password" not in client.get("/integrations").text
+
+
+def test_integration_credentials_can_be_replaced_without_redisplaying_secret(
+    client: TestClient, app
+) -> None:
+    csrf = authenticate(client)
+    client.post(
+        "/integrations",
+        data={
+            "kind": "QBITTORRENT",
+            "name": "Downloads",
+            "base_url": "http://qbittorrent:8080",
+            "username": "admin",
+            "password": "wrong-password",
+            "csrf": csrf,
+        },
+    )
+    with app.state.database.session_factory() as session:
+        integration_id = session.scalar(select(IntegrationInstance.id))
+
+    edit_page = client.get(f"/integrations/{integration_id}/edit")
+    assert edit_page.status_code == 200
+    assert "wrong-password" not in edit_page.text
+    assert 'value="Downloads"' in edit_page.text
+
+    response = client.post(
+        f"/integrations/{integration_id}/edit",
+        data={
+            "name": "Downloads",
+            "base_url": "http://qbittorrent:8080",
+            "api_key": "",
+            "username": "admin",
+            "password": "correct-password",
+            "csrf": csrf_from(edit_page),
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    with app.state.database.session_factory() as session:
+        integration = session.get(IntegrationInstance, integration_id)
+        assert integration is not None
+        credentials = app.state.credential_cipher.decrypt(integration.credentials_encrypted)
+        assert credentials == {"username": "admin", "password": "correct-password"}
+
+
+def test_integration_removal_requires_name_and_deletes_only_local_records(
+    client: TestClient, app
+) -> None:
+    csrf = authenticate(client)
+    client.post(
+        "/integrations",
+        data={
+            "kind": "QBITTORRENT",
+            "name": "Downloads",
+            "base_url": "http://qbittorrent:8080",
+            "username": "admin",
+            "password": "wrong-password",
+            "csrf": csrf,
+        },
+    )
+    with app.state.database.session_factory() as session:
+        integration = session.scalar(select(IntegrationInstance))
+        assert integration is not None
+        integration_id = integration.id
+        session.add(
+            SourceFreshness(
+                integration_id=integration_id,
+                source_kind="QBITTORRENT",
+                stale_after_seconds=900,
+            )
+        )
+        session.commit()
+
+    edit_page = client.get(f"/integrations/{integration_id}/edit")
+    rejected = client.post(
+        f"/integrations/{integration_id}/delete",
+        data={"confirm_name": "not-the-name", "csrf": csrf_from(edit_page)},
+    )
+    assert rejected.status_code == 422
+    with app.state.database.session_factory() as session:
+        assert session.get(IntegrationInstance, integration_id) is not None
+
+    accepted = client.post(
+        f"/integrations/{integration_id}/delete",
+        data={"confirm_name": "Downloads", "csrf": csrf_from(rejected)},
+        follow_redirects=False,
+    )
+    assert accepted.status_code == 303
+    with app.state.database.session_factory() as session:
+        assert session.get(IntegrationInstance, integration_id) is None
+        assert (
+            session.scalar(
+                select(SourceFreshness).where(SourceFreshness.integration_id == integration_id)
+            )
+            is None
+        )
+        event = session.scalar(
+            select(EventRecord).where(EventRecord.event_type == "integration.removed")
+        )
+        assert event is not None
+        assert event.entity_id == integration_id
 
 
 def test_managed_mode_requires_explicit_confirmation(client: TestClient, app) -> None:

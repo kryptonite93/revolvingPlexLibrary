@@ -44,8 +44,10 @@ from app.services.integrations import (
     create_integration,
     discover_from_overseerr,
     discover_plex_libraries,
+    remove_integration_local_data,
     set_active_management,
     test_integration,
+    update_integration,
 )
 from app.services.inventory import (
     get_inventory_policy,
@@ -470,6 +472,150 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return _integrations_redirect(message=detail)
         return _integrations_redirect(
             error="Connection failed. Check the saved URL and credentials."
+        )
+
+    @app.get("/integrations/{integration_id}/edit", response_class=HTMLResponse)
+    def integrations_edit_page(
+        integration_id: str,
+        request: Request,
+        session: Session = Depends(_session),
+    ):
+        admin = _require_admin(request, session)
+        integration = session.get(IntegrationInstance, integration_id)
+        if integration is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+        return _render(
+            request,
+            "integration_edit.html",
+            {
+                "admin": admin,
+                "integration": integration,
+                "form": {
+                    "name": integration.name,
+                    "base_url": integration.base_url,
+                    "username": "",
+                },
+                "delete_error": None,
+            },
+        )
+
+    @app.post("/integrations/{integration_id}/edit")
+    def integrations_edit(
+        integration_id: str,
+        request: Request,
+        name: str = Form(),
+        base_url: str = Form(),
+        api_key: str = Form(""),
+        username: str = Form(""),
+        password: str = Form(""),
+        csrf: str = Form(),
+        session: Session = Depends(_session),
+    ):
+        verify_csrf(request, csrf)
+        admin = _require_admin(request, session)
+        integration = session.get(IntegrationInstance, integration_id)
+        if integration is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+        try:
+            credentials_replaced = update_integration(
+                session,
+                request.app.state.credential_cipher,
+                integration,
+                name=name,
+                base_url=base_url,
+                api_key=api_key,
+                username=username,
+                password=password,
+            )
+        except ValueError as validation_error:
+            validation_message = str(validation_error)
+            field = "credentials"
+            if "URL" in validation_message or "url" in validation_message:
+                field = "base_url"
+            elif "Name" in validation_message:
+                field = "name"
+            return _render(
+                request,
+                "integration_edit.html",
+                {
+                    "admin": admin,
+                    "integration": integration,
+                    "errors": {field: validation_message},
+                    "form": {
+                        "name": name,
+                        "base_url": base_url,
+                        "username": username,
+                    },
+                    "delete_error": None,
+                },
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            )
+        append_event(
+            session,
+            event_type="integration.updated",
+            entity_type="integration",
+            entity_id=integration.id,
+            actor_type="admin",
+            actor_id=admin.id,
+            payload={
+                "kind": integration.kind,
+                "base_url": integration.base_url,
+                "credentials_replaced": credentials_replaced,
+                "enabled": integration.enabled,
+            },
+        )
+        session.commit()
+        return _integrations_redirect(
+            message=f"{integration.name} updated. Test the connection before enabling it."
+        )
+
+    @app.post("/integrations/{integration_id}/delete")
+    def integrations_delete(
+        integration_id: str,
+        request: Request,
+        confirm_name: str = Form(),
+        csrf: str = Form(),
+        session: Session = Depends(_session),
+    ):
+        verify_csrf(request, csrf)
+        admin = _require_admin(request, session)
+        integration = session.get(IntegrationInstance, integration_id)
+        if integration is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+        if confirm_name.strip() != integration.name:
+            return _render(
+                request,
+                "integration_edit.html",
+                {
+                    "admin": admin,
+                    "integration": integration,
+                    "form": {
+                        "name": integration.name,
+                        "base_url": integration.base_url,
+                        "username": "",
+                    },
+                    "delete_error": f"Type {integration.name} exactly to confirm removal.",
+                },
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            )
+        removed_name = integration.name
+        append_event(
+            session,
+            event_type="integration.removed",
+            entity_type="integration",
+            entity_id=integration.id,
+            actor_type="admin",
+            actor_id=admin.id,
+            payload={
+                "kind": integration.kind,
+                "base_url": integration.base_url,
+                "scope": "local_configuration_and_inventory_only",
+            },
+        )
+        remove_integration_local_data(session, integration)
+        session.commit()
+        return _integrations_redirect(
+            message=f"{removed_name} removed from this app. No external service was changed."
         )
 
     @app.post("/integrations/{integration_id}/enabled")

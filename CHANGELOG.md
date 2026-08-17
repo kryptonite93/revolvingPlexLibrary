@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added integration editing and typed-confirmation local removal without sending delete commands to connected services.
 - Fixed Unraid startup by running the container as the standard appdata owner (`99:100`).
 - Reduced the local administrator password minimum from 12 characters to 8.
 
