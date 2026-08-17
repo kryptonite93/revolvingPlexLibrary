@@ -6,7 +6,7 @@ from pathlib import Path
 from urllib.parse import quote_plus
 
 import httpx
-from fastapi import Depends, FastAPI, Form, HTTPException, Request, status
+from fastapi import Depends, FastAPI, Form, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -57,6 +57,7 @@ from app.services.inventory import (
     source_is_fresh,
     sync_integration,
 )
+from app.services.media_workbench import WorkbenchRow, build_workbench_page
 from app.services.scheduler import inventory_scheduler_loop
 from app.settings import Settings
 
@@ -900,18 +901,49 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request: Request,
         message: str | None = None,
         error: str | None = None,
+        search: str = Query(default="", max_length=120),
+        source: str = "",
+        media_type: str = "",
+        library_state: str = "",
+        decision: str = "",
+        watch_state: str = "",
+        sort: str = "retention_soonest",
+        page: int = Query(default=1, ge=1),
         session: Session = Depends(_session),
     ):
         admin = _require_admin(request, session)
-        records = session.execute(
+        lifecycle_query = (
             select(MediaLifecycle, MediaIdentity, IntegrationInstance)
             .join(MediaIdentity, MediaLifecycle.identity_id == MediaIdentity.id)
             .join(
                 IntegrationInstance,
                 MediaLifecycle.integration_id == IntegrationInstance.id,
             )
-            .order_by(MediaLifecycle.retention_deadline, MediaIdentity.canonical_title)
-        ).all()
+        )
+        normalized_search = search.strip()
+        if normalized_search:
+            lifecycle_query = lifecycle_query.where(
+                MediaIdentity.canonical_title.ilike(f"%{normalized_search}%")
+            )
+        if source:
+            lifecycle_query = lifecycle_query.where(IntegrationInstance.id == source)
+        if media_type in {"MOVIE", "SEASON"}:
+            lifecycle_query = lifecycle_query.where(MediaIdentity.media_type == media_type)
+        if library_state in {"ACTIVE", "MISSING"}:
+            lifecycle_query = lifecycle_query.where(MediaLifecycle.state == library_state)
+        if decision in {
+            "KEEP_PROTECTED",
+            "KEEP_RETAINED",
+            "REVIEW_ELIGIBLE",
+            "BLOCKED_STALE",
+            "BLOCKED_UNKNOWN",
+        }:
+            lifecycle_query = lifecycle_query.where(MediaLifecycle.decision == decision)
+        if watch_state == "WATCHED":
+            lifecycle_query = lifecycle_query.where(MediaLifecycle.watched.is_(True))
+        elif watch_state == "NEVER_WATCHED":
+            lifecycle_query = lifecycle_query.where(MediaLifecycle.watched.is_(False))
+        records = session.execute(lifecycle_query).all()
         mapping_counts = dict(
             session.execute(
                 select(
@@ -921,14 +953,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ).all()
         )
         rows = [
-            {
-                "lifecycle": lifecycle,
-                "identity": identity,
-                "integration": integration,
-                "torrent_count": mapping_counts.get(lifecycle.id, 0),
-            }
+            WorkbenchRow(
+                lifecycle=lifecycle,
+                identity=identity,
+                integration=integration,
+                torrent_count=mapping_counts.get(lifecycle.id, 0),
+            )
             for lifecycle, identity, integration in records
         ]
+        valid_sorts = {"retention_soonest", "retention_latest", "title", "imported_newest"}
+        normalized_sort = sort if sort in valid_sorts else "retention_soonest"
+        workbench = build_workbench_page(rows, sort=normalized_sort, page=page)
+        source_options = session.scalars(
+            select(IntegrationInstance)
+            .where(IntegrationInstance.kind.in_(("RADARR", "SONARR")))
+            .order_by(IntegrationInstance.name)
+        ).all()
         freshness = session.scalars(
             select(SourceFreshness).order_by(SourceFreshness.source_kind)
         ).all()
@@ -939,7 +979,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "media.html",
             {
                 "admin": admin,
-                "rows": rows,
+                "workbench": workbench,
+                "source_options": source_options,
+                "filters": {
+                    "search": normalized_search,
+                    "source": source,
+                    "media_type": media_type,
+                    "library_state": library_state,
+                    "decision": decision,
+                    "watch_state": watch_state,
+                    "sort": normalized_sort,
+                },
+                "active_filter_count": sum(
+                    bool(value)
+                    for value in (
+                        normalized_search,
+                        source,
+                        media_type,
+                        library_state,
+                        decision,
+                        watch_state,
+                    )
+                ),
+                "previous_url": str(request.url.include_query_params(page=workbench.page - 1))
+                if workbench.page > 1
+                else None,
+                "next_url": str(request.url.include_query_params(page=workbench.page + 1))
+                if workbench.page < workbench.page_count
+                else None,
                 "freshness": freshness,
                 "fresh_count": fresh_count,
                 "message": message,

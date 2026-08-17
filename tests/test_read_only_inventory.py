@@ -184,6 +184,62 @@ def test_qbittorrent_api_key_inventory_is_get_only() -> None:
     assert methods == ["GET", "GET"]
 
 
+def test_sonarr_sync_tracks_download_and_monitoring_state(app, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.services.inventory.ArrAdapter.inventory",
+        lambda _adapter, _kind: {
+            "items": [
+                {
+                    "id": 7,
+                    "title": "The Show",
+                    "tvdbId": 100,
+                    "seasons": [
+                        {"seasonNumber": 1, "monitored": True},
+                        {"seasonNumber": 2, "monitored": False},
+                    ],
+                }
+            ],
+            "files": [
+                {
+                    "id": 11,
+                    "seriesId": 7,
+                    "seasonNumber": 1,
+                    "size": 1234,
+                    "dateAdded": "2026-01-10T12:00:00Z",
+                }
+            ],
+            "episodes": [],
+            "history": [],
+            "tags": [],
+        },
+    )
+    with app.state.database.session_factory() as session:
+        integration = IntegrationInstance(
+            kind="SONARR",
+            name="Sonarr",
+            base_url="http://sonarr:8989",
+            enabled=True,
+            management_mode="MANAGED",
+            credentials_encrypted=app.state.credential_cipher.encrypt({"api_key": "secret"}),
+        )
+        session.add(integration)
+        session.flush()
+        run = sync_integration(session, integration, app.state.credential_cipher)
+        session.commit()
+        assert run.status == "SUCCEEDED"
+
+    with app.state.database.session_factory() as session:
+        records = session.execute(
+            select(MediaLifecycle, MediaIdentity)
+            .join(MediaIdentity, MediaLifecycle.identity_id == MediaIdentity.id)
+            .order_by(MediaIdentity.season_number)
+        ).all()
+        assert [(item.state, item.monitored) for item, _identity in records] == [
+            ("ACTIVE", True),
+            ("MISSING", False),
+        ]
+
+
 def test_tv_playback_resets_current_and_later_imported_seasons(app) -> None:
     watched_at = datetime(2026, 4, 2, 18, tzinfo=UTC)
     with app.state.database.session_factory() as session:
@@ -275,3 +331,94 @@ def test_media_workbench_and_policy_are_web_configurable(client, app) -> None:
     assert response.status_code == 200
     assert "Inventory policy saved" in response.text
     assert 'name="meaningful_minutes" min="1" max="1440" value="12"' in response.text
+
+
+def test_media_workbench_groups_tv_and_filters_large_inventory(client, app) -> None:
+    authenticate(client)
+    with app.state.database.session_factory() as session:
+        sonarr = IntegrationInstance(
+            kind="SONARR",
+            name="Sonarr",
+            base_url="http://sonarr:8989",
+            enabled=True,
+            management_mode="MANAGED",
+            credentials_encrypted=app.state.credential_cipher.encrypt({"api_key": "secret"}),
+        )
+        radarr = IntegrationInstance(
+            kind="RADARR",
+            name="Radarr-4K",
+            base_url="http://radarr:7878",
+            enabled=True,
+            management_mode="PROTECTED",
+            credentials_encrypted=app.state.credential_cipher.encrypt({"api_key": "secret"}),
+        )
+        session.add_all([sonarr, radarr])
+        session.flush()
+        for number, state, monitored in ((1, "ACTIVE", True), (2, "MISSING", False)):
+            identity = MediaIdentity(
+                media_type="SEASON",
+                source_key=f"tvdb:100:season:{number}",
+                canonical_title=f"The Show · Season {number}",
+                series_tvdb_id=100,
+                season_number=number,
+            )
+            session.add(identity)
+            session.flush()
+            session.add(
+                MediaLifecycle(
+                    identity_id=identity.id,
+                    integration_id=sonarr.id,
+                    arr_item_id=7,
+                    state=state,
+                    monitored=monitored,
+                    protection_state="UNPROTECTED",
+                    decision="BLOCKED_UNKNOWN",
+                    decision_reason="Source data incomplete",
+                )
+            )
+        movie_identity = MediaIdentity(
+            media_type="MOVIE",
+            source_key="tmdb:200",
+            canonical_title="The Movie",
+            tmdb_id=200,
+        )
+        session.add(movie_identity)
+        session.flush()
+        session.add(
+            MediaLifecycle(
+                identity_id=movie_identity.id,
+                integration_id=radarr.id,
+                arr_item_id=8,
+                state="ACTIVE",
+                monitored=True,
+                protection_state="PROTECTED",
+                decision="KEEP_PROTECTED",
+                decision_reason="Protected by INSTANCE_MODE",
+            )
+        )
+        session.commit()
+        sonarr_id = sonarr.id
+        radarr_id = radarr.id
+
+    page = client.get("/media")
+
+    assert "The Show" in page.text
+    assert "2 seasons" in page.text
+    assert "Not downloaded" in page.text
+    assert "Unmonitored in Sonarr" in page.text
+    assert 'name="source"' in page.text
+    assert 'name="media_type"' in page.text
+    assert 'name="library_state"' in page.text
+    assert 'name="decision"' in page.text
+    assert 'name="watch_state"' in page.text
+    assert 'name="sort"' in page.text
+
+    radarr_only = client.get(f"/media?source={radarr_id}")
+    assert "The Movie" in radarr_only.text
+    assert "The Show" not in radarr_only.text
+
+    missing_tv = client.get(f"/media?source={sonarr_id}&library_state=MISSING")
+    assert "The Show" in missing_tv.text
+    assert "Season 2" in missing_tv.text
+    assert "Season 1" not in missing_tv.text
+    assert "The Movie" not in missing_tv.text

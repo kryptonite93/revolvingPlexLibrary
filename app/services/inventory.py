@@ -345,6 +345,9 @@ def sync_arr(
             if history_imported and (imported is None or history_imported < imported):
                 imported = history_imported
             lifecycle.state = "ACTIVE" if item.get("hasFile") else "MISSING"
+            lifecycle.monitored = (
+                bool(item["monitored"]) if item.get("monitored") is not None else None
+            )
             lifecycle.first_imported_at = lifecycle.first_imported_at or imported
             lifecycle.current_path = (
                 movie_file.get("path") if isinstance(movie_file, dict) else item.get("path")
@@ -410,6 +413,9 @@ def sync_arr(
                 if history_imported:
                     valid_imports.append(history_imported)
                 lifecycle.state = "ACTIVE" if season_files else "MISSING"
+                lifecycle.monitored = (
+                    bool(season["monitored"]) if season.get("monitored") is not None else None
+                )
                 lifecycle.first_imported_at = lifecycle.first_imported_at or (
                     min(valid_imports) if valid_imports else None
                 )
@@ -513,7 +519,7 @@ def sync_tautulli(
         playback.user_id = str(row.get("user_id") or "") or None
         count += 1
     _apply_playback(session, policy)
-    return {"playbacks": count, "cursor": final_offset}
+    return {"new_playbacks": count, "cursor": final_offset}
 
 
 def _apply_playback(session: Session, policy: InventoryPolicy) -> None:

@@ -209,6 +209,7 @@ class MediaLifecycle(Base):
     plex_rating_key: Mapped[str | None] = mapped_column(String(160), index=True)
     library_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("managed_library.id"))
     state: Mapped[str] = mapped_column(String(24), nullable=False, default="ACTIVE")
+    monitored: Mapped[bool | None] = mapped_column(Boolean)
     first_imported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     previous_imported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

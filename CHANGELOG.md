@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Grouped television seasons by series and added searchable, paginated Media filters.
+- Clarified missing and unmonitored media states throughout the lifecycle workbench.
+- Clarified that Tautulli synchronization reports newly imported playback rows.
 - Rendered Web UI timestamps in the timezone configured by the Unraid template.
 - Fixed Radarr inventory by scoping movie-file requests and paginating complete Arr history.
 - Reduced SQLite contention by completing remote inventory fetches before opening write transactions.
