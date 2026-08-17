@@ -244,8 +244,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         errors: dict[str, str] = {}
         if len(normalized_username) < 3:
             errors["username"] = "Username must be at least 3 characters."
-        if len(password) < 12:
-            errors["password"] = "Password must be at least 12 characters."
+        if len(password) < 8:
+            errors["password"] = "Password must be at least 8 characters."
         if password != password_confirm:
             errors["password_confirm"] = "Passwords do not match."
         if errors:
