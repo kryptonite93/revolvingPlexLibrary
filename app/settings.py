@@ -4,8 +4,9 @@ import os
 import secrets
 from functools import cached_property
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -33,6 +34,15 @@ class Settings(BaseSettings):
     login_attempt_window_seconds: int = Field(default=900, ge=60, le=86_400)
     backup_retention_count: int = Field(default=14, ge=1, le=365)
     scheduler_poll_seconds: int = Field(default=60, ge=10, le=3600)
+
+    @field_validator("timezone")
+    @classmethod
+    def validate_timezone(cls, value: str) -> str:
+        try:
+            ZoneInfo(value)
+        except ZoneInfoNotFoundError as error:
+            raise ValueError(f"Unknown IANA timezone: {value}") from error
+        return value
 
     def prepare(self) -> None:
         self.config_directory.mkdir(parents=True, exist_ok=True)

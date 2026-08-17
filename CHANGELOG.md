@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Rendered Web UI timestamps in the timezone configured by the Unraid template.
 - Fixed Radarr inventory by scoping movie-file requests and paginating complete Arr history.
 - Reduced SQLite contention by completing remote inventory fetches before opening write transactions.
 - Clarified the management-mode confirmation copy.

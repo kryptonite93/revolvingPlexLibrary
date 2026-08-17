@@ -30,6 +30,7 @@ from app.persistence.models import (
     TorrentMediaMapping,
     TorrentTracker,
 )
+from app.presentation import format_local_date, format_local_datetime
 from app.security.auth import (
     LoginRateLimiter,
     csrf_token,
@@ -88,6 +89,7 @@ def _require_admin(request: Request, session: Session) -> AdminUser:
 
 
 def _render(request: Request, name: str, context: dict | None = None, status_code: int = 200):
+    timezone = request.app.state.settings.timezone
     values = {
         "request": request,
         "app_name": request.app.state.settings.app_name,
@@ -95,6 +97,8 @@ def _render(request: Request, name: str, context: dict | None = None, status_cod
         "error": None,
         "errors": {},
         "username": "",
+        "format_date": lambda value: format_local_date(value, timezone),
+        "format_datetime": lambda value: format_local_datetime(value, timezone),
     }
     values.update(context or {})
     return templates.TemplateResponse(

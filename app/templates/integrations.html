@@ -48,8 +48,8 @@
             </div>
 
             <div class="health-detail">
-              {% if integration.last_success_at %}<span>Last success {{ integration.last_success_at.strftime('%Y-%m-%d %H:%M UTC') }}</span>{% else %}<span>No successful test yet</span>{% endif %}
-              {% if source %}<span class="{% if source_is_fresh(source) %}freshness-fresh{% else %}health-error{% endif %}">Inventory {{ 'fresh' if source_is_fresh(source) else source.status|lower|replace('_', ' ') }}{% if source.last_success_at %} · {{ source.last_success_at.strftime('%Y-%m-%d %H:%M UTC') }}{% endif %}</span>{% endif %}
+              {% if integration.last_success_at %}<span>Last success {{ format_datetime(integration.last_success_at) }}</span>{% else %}<span>No successful test yet</span>{% endif %}
+              {% if source %}<span class="{% if source_is_fresh(source) %}freshness-fresh{% else %}health-error{% endif %}">Inventory {{ 'fresh' if source_is_fresh(source) else source.status|lower|replace('_', ' ') }}{% if source.last_success_at %} · {{ format_datetime(source.last_success_at) }}{% endif %}</span>{% endif %}
               {% if integration.sanitized_error %}<span class="health-error">{{ integration.sanitized_error }}</span>{% endif %}
             </div>
 

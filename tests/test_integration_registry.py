@@ -58,6 +58,30 @@ def test_new_integration_is_encrypted_and_disabled(client: TestClient, app) -> N
     assert "Disabled" in page.text
 
 
+def test_integration_timestamp_uses_configured_timezone(client: TestClient, app) -> None:
+    csrf = authenticate(client)
+    client.post(
+        "/integrations",
+        data={
+            "kind": "OVERSEERR",
+            "name": "Requests",
+            "base_url": "http://overseerr:5055",
+            "api_key": "secret",
+            "csrf": csrf,
+        },
+    )
+    with app.state.database.session_factory() as session:
+        integration = session.scalar(select(IntegrationInstance))
+        assert integration is not None
+        integration.last_success_at = datetime(2026, 8, 17, 5, 30, tzinfo=UTC)
+        session.commit()
+
+    page = client.get("/integrations")
+
+    assert "Last success 2026-08-17 01:30 EDT" in page.text
+    assert "2026-08-17 05:30 UTC" not in page.text
+
+
 def test_enable_switch_is_explicit_and_audited(client: TestClient, app) -> None:
     csrf = authenticate(client)
     client.post(
