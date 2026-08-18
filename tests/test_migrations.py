@@ -29,6 +29,7 @@ def test_migrations_apply_to_empty_database(tmp_path, monkeypatch) -> None:
         "torrent_tracker",
         "torrent_media_mapping",
         "request_record",
+        "requester_profile",
         "alembic_version",
     }.issubset(inspector.get_table_names())
     assert "monitored" in {column["name"] for column in inspector.get_columns("media_lifecycle")}

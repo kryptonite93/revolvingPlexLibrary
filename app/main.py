@@ -24,6 +24,7 @@ from app.persistence.models import (
     MediaIdentity,
     MediaLifecycle,
     Playback,
+    RequesterProfile,
     RequestRecord,
     SourceFreshness,
     Torrent,
@@ -54,11 +55,13 @@ from app.services.inventory import (
     get_inventory_policy,
     preview_integration,
     recompute_decisions,
+    set_requester_protection,
     source_is_fresh,
     sync_integration,
 )
 from app.services.media_workbench import WorkbenchRow, build_workbench_page
 from app.services.scheduler import inventory_scheduler_loop
+from app.services.sync_coordinator import SyncAlreadyRunning, SyncCoordinator
 from app.settings import Settings
 
 APP_ROOT = Path(__file__).resolve().parent
@@ -110,7 +113,7 @@ def _render(request: Request, name: str, context: dict | None = None, status_cod
     )
 
 
-def _integration_context(session: Session) -> dict:
+def _integration_context(session: Session, sync_activity=None) -> dict:
     integrations = session.scalars(
         select(IntegrationInstance).order_by(IntegrationInstance.kind, IntegrationInstance.name)
     ).all()
@@ -121,18 +124,41 @@ def _integration_context(session: Session) -> dict:
     freshness_by_integration = {
         row.integration_id: row for row in session.scalars(select(SourceFreshness)).all()
     }
+    requesters_by_integration: dict[str, list[RequesterProfile]] = {}
+    requesters = session.scalars(
+        select(RequesterProfile).order_by(
+            RequesterProfile.display_name,
+            RequesterProfile.username,
+            RequesterProfile.email,
+            RequesterProfile.external_id,
+        )
+    ).all()
+    for profile in requesters:
+        requesters_by_integration.setdefault(profile.integration_id, []).append(profile)
     return {
         "integrations": integrations,
         "libraries_by_plex": libraries_by_plex,
         "freshness_by_integration": freshness_by_integration,
+        "requesters_by_integration": requesters_by_integration,
+        "sync_activity": sync_activity,
         "source_is_fresh": source_is_fresh,
     }
 
 
-def _integrations_redirect(*, message: str | None = None, error: str | None = None):
+def _integrations_redirect(
+    *,
+    message: str | None = None,
+    error: str | None = None,
+    warning: str | None = None,
+):
     if error:
         return RedirectResponse(
             f"/integrations?error={quote_plus(error)}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    if warning:
+        return RedirectResponse(
+            f"/integrations?warning={quote_plus(warning)}",
             status_code=status.HTTP_303_SEE_OTHER,
         )
     return RedirectResponse(
@@ -163,6 +189,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     application.state.database,
                     application.state.credential_cipher,
                     poll_seconds=active_settings.scheduler_poll_seconds,
+                    coordinator=application.state.sync_coordinator,
                 )
             )
         yield
@@ -181,6 +208,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = active_settings
     app.state.database = database
     app.state.credential_cipher = CredentialCipher(active_settings.credential_encryption_key)
+    app.state.sync_coordinator = SyncCoordinator()
     app.state.login_limiter = LoginRateLimiter(
         active_settings.login_attempt_limit,
         active_settings.login_attempt_window_seconds,
@@ -371,11 +399,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request: Request,
         message: str | None = None,
         error: str | None = None,
+        warning: str | None = None,
         session: Session = Depends(_session),
     ):
         admin = _require_admin(request, session)
-        context = _integration_context(session)
-        context.update({"admin": admin, "message": message, "error": error})
+        context = _integration_context(session, request.app.state.sync_coordinator.current())
+        context.update(
+            {"admin": admin, "message": message, "error": error, "warning": warning}
+        )
         return _render(
             request,
             "integrations.html",
@@ -844,26 +875,71 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if integration is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
         try:
-            run = sync_integration(session, integration, request.app.state.credential_cipher)
+            with request.app.state.sync_coordinator.acquire(
+                integration.id, integration.name, trigger="manual"
+            ):
+                run = sync_integration(session, integration, request.app.state.credential_cipher)
+                append_event(
+                    session,
+                    event_type="inventory.sync_completed",
+                    entity_type="integration",
+                    entity_id=integration.id,
+                    actor_type="admin",
+                    actor_id=admin.id,
+                    payload={"status": run.status, "counts": run.counts},
+                )
+                session.commit()
+        except SyncAlreadyRunning as conflict:
+            session.rollback()
+            return _integrations_redirect(
+                warning=(
+                    f"Sync running: {conflict.activity.integration_name}. "
+                    "Try again after it finishes."
+                )
+            )
         except ValueError as error:
             session.rollback()
             return _integrations_redirect(error=str(error))
-        append_event(
-            session,
-            event_type="inventory.sync_completed",
-            entity_type="integration",
-            entity_id=integration.id,
-            actor_type="admin",
-            actor_id=admin.id,
-            payload={"status": run.status, "counts": run.counts},
-        )
-        session.commit()
         if run.status == "FAILED":
             return _integrations_redirect(
                 error=f"{integration.name} sync failed: {run.sanitized_error}"
             )
         summary = ", ".join(f"{value} {key}" for key, value in run.counts.items())
         return _integrations_redirect(message=f"{integration.name} synchronized: {summary}.")
+
+    @app.post("/requesters/{profile_id}/protected")
+    def requester_protection_toggle(
+        profile_id: str,
+        request: Request,
+        csrf: str = Form(),
+        session: Session = Depends(_session),
+    ):
+        verify_csrf(request, csrf)
+        admin = _require_admin(request, session)
+        profile = session.get(RequesterProfile, profile_id)
+        if profile is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+        target = not profile.protected
+        set_requester_protection(session, profile, protected=target)
+        append_event(
+            session,
+            event_type="requester.protection_changed",
+            entity_type="requester_profile",
+            entity_id=profile.id,
+            actor_type="admin",
+            actor_id=admin.id,
+            payload={
+                "integration_id": profile.integration_id,
+                "external_id": profile.external_id,
+                "protected": target,
+            },
+        )
+        session.commit()
+        label = profile.display_name or profile.username or profile.email or profile.external_id
+        state = "enabled" if target else "removed"
+        return _integrations_redirect(
+            message=f"Requester protection {state} for {label}."
+        )
 
     @app.post("/integrations/{integration_id}/preview")
     def integration_preview(
@@ -943,9 +1019,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 MediaLifecycle.state == "ACTIVE",
             )
         if watch_state == "WATCHED":
-            lifecycle_query = lifecycle_query.where(MediaLifecycle.watched.is_(True))
+            lifecycle_query = lifecycle_query.where(
+                MediaLifecycle.watched.is_(True), MediaLifecycle.state == "ACTIVE"
+            )
         elif watch_state == "NEVER_WATCHED":
-            lifecycle_query = lifecycle_query.where(MediaLifecycle.watched.is_(False))
+            lifecycle_query = lifecycle_query.where(
+                MediaLifecycle.watched.is_(False), MediaLifecycle.state == "ACTIVE"
+            )
         records = session.execute(lifecycle_query).all()
         mapping_counts = dict(
             session.execute(
@@ -1140,8 +1220,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             condition = request_filters[0]
             for item in request_filters[1:]:
                 condition = condition | item
-            requests = session.scalars(
-                select(RequestRecord).where(condition, RequestRecord.present.is_(True))
+            requests = session.execute(
+                select(RequestRecord, RequesterProfile)
+                .outerjoin(
+                    RequesterProfile,
+                    (RequesterProfile.integration_id == RequestRecord.integration_id)
+                    & (RequesterProfile.external_id == RequestRecord.requester_id),
+                )
+                .where(condition, RequestRecord.present.is_(True))
             ).all()
         freshness = session.scalars(
             select(SourceFreshness).order_by(SourceFreshness.source_kind)

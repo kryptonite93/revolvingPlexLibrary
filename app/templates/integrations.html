@@ -10,8 +10,10 @@
     </header>
 
     {% if message %}<div class="notice notice-success" role="status">{{ message }}</div>{% endif %}
+    {% if warning %}<div class="notice notice-warning" role="status">{{ warning }}</div>{% endif %}
     {% if error %}<div class="notice notice-error" role="alert">{{ error }}</div>{% endif %}
     {% if errors %}<div class="notice notice-error" role="alert"><strong>Check the highlighted field.</strong></div>{% endif %}
+    {% if sync_activity %}<div class="notice notice-warning sync-running-notice" role="status"><strong>Sync running: {{ sync_activity.integration_name }}</strong><span>All other inventory syncs will be available after this one finishes.</span></div>{% endif %}
 
     <section class="integration-layout" aria-label="Integration setup">
       <div class="integration-list">
@@ -22,6 +24,7 @@
         {% if integrations %}
           {% for integration in integrations %}
           {% set libraries = libraries_by_plex.get(integration.id, []) %}
+          {% set requesters = requesters_by_integration.get(integration.id, []) %}
           {% set source = freshness_by_integration.get(integration.id) %}
           <article class="integration-row">
             <div class="integration-summary">
@@ -60,8 +63,8 @@
                 <div class="control-group"><h4>Read-only operations</h4><p>Preview the next inventory pull before running an enabled connector on demand.</p>
                   <div class="operation-buttons">
                     <form method="post" action="/integrations/{{ integration.id }}/preview"><input type="hidden" name="csrf" value="{{ csrf_token }}"><button class="button button-secondary" type="submit" aria-label="Preview read-only inventory for {{ integration.name }}" {% if not integration.enabled %}disabled aria-describedby="preview-note-{{ integration.id }}"{% endif %}>Preview inventory</button></form>
-                    <form method="post" action="/integrations/{{ integration.id }}/sync"><input type="hidden" name="csrf" value="{{ csrf_token }}"><button class="button button-secondary" type="submit" aria-label="Synchronize read-only inventory for {{ integration.name }}" {% if not integration.enabled %}disabled aria-describedby="sync-note-{{ integration.id }}"{% endif %}>Sync now</button></form>
-                    {% if not integration.enabled %}<small id="preview-note-{{ integration.id }}">Enable read-only before previewing source records.</small><small id="sync-note-{{ integration.id }}">Enable read-only before saving inventory.</small>{% else %}<small>Preview fetches counts and saves no inventory.</small><small>Sync stores normalized read-only records and freshness.</small>{% endif %}
+                    <form method="post" action="/integrations/{{ integration.id }}/sync"><input type="hidden" name="csrf" value="{{ csrf_token }}"><button class="button button-secondary" type="submit" aria-label="Synchronize read-only inventory for {{ integration.name }}" {% if not integration.enabled or sync_activity %}disabled aria-describedby="sync-note-{{ integration.id }}"{% endif %}>Sync now</button></form>
+                    {% if not integration.enabled %}<small id="preview-note-{{ integration.id }}">Enable read-only before previewing source records.</small><small id="sync-note-{{ integration.id }}">Enable read-only before saving inventory.</small>{% else %}<small>Preview fetches counts and saves no inventory.</small><small id="sync-note-{{ integration.id }}">{% if sync_activity %}Sync running: {{ sync_activity.integration_name }}.{% else %}Sync stores normalized read-only records and freshness.{% endif %}</small>{% endif %}
                   </div>
                 </div>
                 {% if integration.kind == "OVERSEERR" %}
@@ -70,6 +73,15 @@
                     <input type="hidden" name="csrf" value="{{ csrf_token }}"><button class="button button-secondary" type="submit" aria-label="Discover Arr services from {{ integration.name }}" {% if not integration.enabled %}disabled aria-describedby="discover-note-{{ integration.id }}"{% endif %}>Discover Arr services</button>
                     {% if not integration.enabled %}<small class="action-note" id="discover-note-{{ integration.id }}">Enable read-only first.</small>{% endif %}
                   </form>
+                </div>
+                <div class="control-group requester-control"><h4>Protected requesters</h4><p>Only requests from people you select add requester-based protection. Newly discovered users start unprotected.</p>
+                  {% if requesters %}<div class="requester-list" aria-label="Overseerr requester protection">
+                    {% for requester in requesters %}<form method="post" action="/requesters/{{ requester.id }}/protected" class="requester-row">
+                      <input type="hidden" name="csrf" value="{{ csrf_token }}">
+                      <span class="requester-identity"><strong>{{ requester.display_name or requester.username or requester.email or 'Overseerr user ' ~ requester.external_id }}</strong><small>{% if requester.username %}@{{ requester.username }}{% endif %}{% if requester.username and requester.email %} · {% endif %}{% if requester.email %}{{ requester.email }}{% endif %}</small><em class="{% if requester.protected %}state-protected{% endif %}">{% if requester.protected %}Protected requester{% else %}Not protected{% endif %}</em></span>
+                      <button class="button button-quiet compact-action" type="submit" aria-label="{% if requester.protected %}Remove requester protection for{% else %}Protect requests from{% endif %} {{ requester.display_name or requester.username or requester.email or requester.external_id }}">{% if requester.protected %}Remove protection{% else %}Protect requests{% endif %}</button>
+                    </form>{% endfor %}
+                  </div>{% else %}<p class="empty-inline">Sync Overseerr to discover requesters. Importing users does not protect them automatically.</p>{% endif %}
                 </div>
                 {% endif %}
 

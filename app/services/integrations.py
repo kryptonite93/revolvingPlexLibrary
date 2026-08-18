@@ -19,6 +19,7 @@ from app.persistence.models import (
     MediaFileRevision,
     MediaLifecycle,
     Playback,
+    RequesterProfile,
     RequestRecord,
     SourceFreshness,
     SyncRun,
@@ -192,7 +193,7 @@ def remove_integration_local_data(session: Session, integration: IntegrationInst
         session.execute(delete(TorrentTracker).where(TorrentTracker.torrent_id.in_(torrent_ids)))
         session.execute(delete(Torrent).where(Torrent.id.in_(torrent_ids)))
 
-    for model in (Playback, RequestRecord, SyncRun, SourceFreshness):
+    for model in (Playback, RequestRecord, RequesterProfile, SyncRun, SourceFreshness):
         session.execute(delete(model).where(model.integration_id == integration_id))
     session.execute(
         delete(ManagedLibrary).where(ManagedLibrary.plex_integration_id == integration_id)

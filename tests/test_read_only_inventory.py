@@ -15,6 +15,8 @@ from app.persistence.models import (
     MediaIdentity,
     MediaLifecycle,
     Playback,
+    RequesterProfile,
+    RequestRecord,
     SourceFreshness,
 )
 from app.services.inventory import (
@@ -23,6 +25,7 @@ from app.services.inventory import (
     recompute_decisions,
     retention_deadline,
     sync_integration,
+    sync_overseerr,
 )
 from app.services.scheduler import run_due_inventory_syncs
 
@@ -246,6 +249,206 @@ def test_sonarr_sync_tracks_download_and_monitoring_state(app, monkeypatch) -> N
         ]
         assert records[1][0].decision == "NOT_IN_LIBRARY"
         assert records[1][0].decision_reason == "No downloaded files are present"
+
+
+def test_overseerr_sync_stores_requester_identity_unprotected_by_default(app) -> None:
+    with app.state.database.session_factory() as session:
+        overseerr = IntegrationInstance(
+            kind="OVERSEERR",
+            name="MediaMule Requests",
+            base_url="http://overseerr:5055",
+            enabled=True,
+            credentials_encrypted=app.state.credential_cipher.encrypt({"api_key": "secret"}),
+        )
+        radarr = IntegrationInstance(
+            kind="RADARR",
+            name="Radarr",
+            base_url="http://radarr:7878",
+            enabled=True,
+            management_mode="MANAGED",
+            credentials_encrypted=app.state.credential_cipher.encrypt({"api_key": "secret"}),
+        )
+        identity = MediaIdentity(
+            media_type="MOVIE",
+            source_key="tmdb:200",
+            canonical_title="The Movie",
+            tmdb_id=200,
+        )
+        session.add_all([overseerr, radarr, identity])
+        session.flush()
+        lifecycle = MediaLifecycle(
+            identity_id=identity.id,
+            integration_id=radarr.id,
+            arr_item_id=8,
+            state="ACTIVE",
+            protection_state="UNPROTECTED",
+            protection_sources=[],
+        )
+        session.add(lifecycle)
+
+        sync_overseerr(
+            session,
+            overseerr,
+            {"api_key": "secret"},
+            rows=[
+                {
+                    "id": 44,
+                    "type": "movie",
+                    "status": 2,
+                    "media": {"tmdbId": 200},
+                    "requestedBy": {
+                        "id": 9,
+                        "username": "viewer",
+                        "displayName": "Viewer Name",
+                        "email": "viewer@example.com",
+                    },
+                    "createdAt": "2026-01-01T12:00:00Z",
+                }
+            ],
+        )
+
+        profile = session.scalar(select(RequesterProfile))
+        request_record = session.scalar(select(RequestRecord))
+        assert profile is not None
+        assert profile.external_id == "9"
+        assert profile.username == "viewer"
+        assert profile.display_name == "Viewer Name"
+        assert profile.email == "viewer@example.com"
+        assert profile.protected is False
+        assert request_record is not None and request_record.requester_id == "9"
+        assert lifecycle.protection_state == "UNPROTECTED"
+        assert "PROTECTED_REQUESTER" not in lifecycle.protection_sources
+
+        profile.protected = True
+        sync_overseerr(
+            session,
+            overseerr,
+            {"api_key": "secret"},
+            rows=[
+                {
+                    "id": 44,
+                    "type": "movie",
+                    "status": 2,
+                    "media": {"tmdbId": 200},
+                    "requestedBy": {"id": 9},
+                }
+            ],
+        )
+
+        assert profile.protected is True
+        assert profile.username == "viewer"
+        assert profile.display_name == "Viewer Name"
+        assert profile.email == "viewer@example.com"
+        assert lifecycle.protection_state == "PROTECTED"
+        assert "PROTECTED_REQUESTER" in lifecycle.protection_sources
+
+
+def test_requester_protection_is_web_configurable_and_visible(client, app) -> None:
+    authenticate(client)
+    with app.state.database.session_factory() as session:
+        overseerr = IntegrationInstance(
+            kind="OVERSEERR",
+            name="MediaMule Requests",
+            base_url="http://overseerr:5055",
+            enabled=True,
+            credentials_encrypted=app.state.credential_cipher.encrypt({"api_key": "secret"}),
+        )
+        profile = RequesterProfile(
+            integration_id="pending",
+            external_id="9",
+            username="viewer",
+            display_name="Viewer Name",
+            email="viewer@example.com",
+            protected=False,
+        )
+        session.add(overseerr)
+        session.flush()
+        profile.integration_id = overseerr.id
+        session.add(profile)
+        session.commit()
+        profile_id = profile.id
+
+    page = client.get("/integrations")
+    assert "Viewer Name" in page.text
+    assert "@viewer" in page.text
+    assert "viewer@example.com" in page.text
+    assert "Not protected" in page.text
+
+    response = client.post(
+        f"/requesters/{profile_id}/protected",
+        data={"csrf": csrf_from(page)},
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    assert "Requester protection enabled for Viewer Name" in response.text
+    with app.state.database.session_factory() as session:
+        profile = session.get(RequesterProfile, profile_id)
+        assert profile is not None and profile.protected is True
+
+
+def test_running_sync_disables_all_sync_actions_and_returns_a_friendly_conflict(
+    client, app
+) -> None:
+    authenticate(client)
+    with app.state.database.session_factory() as session:
+        integration = IntegrationInstance(
+            kind="OVERSEERR",
+            name="MediaMule Requests",
+            base_url="http://overseerr:5055",
+            enabled=True,
+            credentials_encrypted=app.state.credential_cipher.encrypt({"api_key": "secret"}),
+        )
+        session.add(integration)
+        session.commit()
+        integration_id = integration.id
+
+    with app.state.sync_coordinator.acquire(
+        "sonarr-id", "Sonarr-1080P", trigger="scheduled"
+    ):
+        page = client.get("/integrations")
+        assert "Sync running: Sonarr-1080P" in page.text
+        assert re.search(
+            rf'action="/integrations/{integration_id}/sync".*?<button[^>]+disabled',
+            page.text,
+            re.DOTALL,
+        )
+
+        response = client.post(
+            f"/integrations/{integration_id}/sync",
+            data={"csrf": csrf_from(page)},
+            follow_redirects=True,
+        )
+
+    assert response.status_code == 200
+    assert "Sync running: Sonarr-1080P. Try again after it finishes." in response.text
+
+
+def test_scheduler_skips_when_another_inventory_sync_is_running(app, monkeypatch) -> None:
+    with app.state.database.session_factory() as session:
+        integration = IntegrationInstance(
+            kind="OVERSEERR",
+            name="MediaMule Requests",
+            base_url="http://overseerr:5055",
+            enabled=True,
+            credentials_encrypted=app.state.credential_cipher.encrypt({"api_key": "secret"}),
+        )
+        session.add(integration)
+        session.commit()
+
+    monkeypatch.setattr(
+        "app.services.scheduler.sync_integration",
+        lambda *_args: pytest.fail("Scheduler started a second inventory writer"),
+    )
+    with app.state.sync_coordinator.acquire(
+        "sonarr-id", "Sonarr-1080P", trigger="manual"
+    ):
+        completed = run_due_inventory_syncs(
+            app.state.database,
+            app.state.credential_cipher,
+            app.state.sync_coordinator,
+        )
+
+    assert completed == 0
 
 
 def test_tv_playback_resets_current_and_later_imported_seasons(app) -> None:
@@ -678,3 +881,7 @@ def test_media_workbench_groups_tv_and_filters_large_inventory(client, app) -> N
 
     review_eligible = client.get("/media?decision=REVIEW_ELIGIBLE")
     assert "The Show" not in review_eligible.text
+
+    never_watched = client.get("/media?watch_state=NEVER_WATCHED")
+    assert "Season 1" in never_watched.text
+    assert "Season 2" not in never_watched.text

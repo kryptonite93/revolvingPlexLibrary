@@ -21,6 +21,7 @@ from app.persistence.models import (
     MediaIdentity,
     MediaLifecycle,
     Playback,
+    RequesterProfile,
     RequestRecord,
     SourceFreshness,
     SyncRun,
@@ -616,6 +617,7 @@ def sync_overseerr(
     session.query(RequestRecord).filter(RequestRecord.integration_id == integration.id).update(
         {"present": False}
     )
+    now = utc_now()
     for row in rows:
         request_id = int(row["id"])
         record = session.scalar(
@@ -637,6 +639,31 @@ def sync_overseerr(
         record.requested_at = parse_datetime(row.get("createdAt"))
         record.updated_at = parse_datetime(row.get("updatedAt"))
         record.present = True
+        if record.requester_id:
+            profile = session.scalar(
+                select(RequesterProfile).where(
+                    RequesterProfile.integration_id == integration.id,
+                    RequesterProfile.external_id == record.requester_id,
+                )
+            )
+            if profile is None:
+                profile = RequesterProfile(
+                    integration_id=integration.id,
+                    external_id=record.requester_id,
+                    protected=False,
+                )
+                session.add(profile)
+            username = requested_by.get("username") or requested_by.get("plexUsername")
+            if username:
+                profile.username = str(username).strip()
+            display_name = requested_by.get("displayName") or username
+            if display_name:
+                profile.display_name = str(display_name).strip()
+            email = requested_by.get("email")
+            if email:
+                profile.email = str(email).strip()
+            profile.last_synced_at = now
+    session.flush()
     _apply_request_protection(session)
     return {"requests": len(rows)}
 
@@ -728,17 +755,29 @@ def sync_plex(
 
 
 def _apply_request_protection(session: Session) -> None:
+    protected_requester = (
+        (RequesterProfile.integration_id == RequestRecord.integration_id)
+        & (RequesterProfile.external_id == RequestRecord.requester_id)
+    )
     active_tmdb = set(
         session.scalars(
-            select(RequestRecord.tmdb_id).where(
-                RequestRecord.present.is_(True), RequestRecord.tmdb_id.is_not(None)
+            select(RequestRecord.tmdb_id)
+            .join(RequesterProfile, protected_requester)
+            .where(
+                RequestRecord.present.is_(True),
+                RequestRecord.tmdb_id.is_not(None),
+                RequesterProfile.protected.is_(True),
             )
         ).all()
     )
     active_tvdb = set(
         session.scalars(
-            select(RequestRecord.tvdb_id).where(
-                RequestRecord.present.is_(True), RequestRecord.tvdb_id.is_not(None)
+            select(RequestRecord.tvdb_id)
+            .join(RequesterProfile, protected_requester)
+            .where(
+                RequestRecord.present.is_(True),
+                RequestRecord.tvdb_id.is_not(None),
+                RequesterProfile.protected.is_(True),
             )
         ).all()
     )
@@ -755,16 +794,34 @@ def _apply_request_protection(session: Session) -> None:
         preserved = [
             source
             for source in lifecycle.protection_sources
-            if source not in {"INSTANCE_MODE", "INSTANCE_IGNORED", "ACTIVE_REQUEST"}
+            if source
+            not in {
+                "INSTANCE_MODE",
+                "INSTANCE_IGNORED",
+                "ACTIVE_REQUEST",
+                "PROTECTED_REQUESTER",
+            }
         ]
         sources.extend(source for source in preserved if source not in sources)
         lifecycle.protection_state = base_state
         if sources:
             lifecycle.protection_state = "PROTECTED"
         if requested:
-            sources.append("ACTIVE_REQUEST")
+            sources.append("PROTECTED_REQUESTER")
             lifecycle.protection_state = "PROTECTED"
         lifecycle.protection_sources = sources
+
+
+def set_requester_protection(
+    session: Session,
+    profile: RequesterProfile,
+    *,
+    protected: bool,
+) -> None:
+    profile.protected = protected
+    session.flush()
+    _apply_request_protection(session)
+    recompute_decisions(session)
 
 
 def sync_qbittorrent(

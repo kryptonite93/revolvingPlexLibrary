@@ -336,6 +336,28 @@ class TorrentMediaMapping(Base):
     )
 
 
+class RequesterProfile(Base):
+    __tablename__ = "requester_profile"
+    __table_args__ = (
+        UniqueConstraint(
+            "integration_id", "external_id", name="uq_requester_profile_external"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    integration_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("integration_instance.id"), nullable=False, index=True
+    )
+    external_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    username: Mapped[str | None] = mapped_column(String(160))
+    display_name: Mapped[str | None] = mapped_column(String(200))
+    email: Mapped[str | None] = mapped_column(String(320))
+    protected: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    last_synced_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+
+
 class RequestRecord(Base):
     __tablename__ = "request_record"
     __table_args__ = (
