@@ -303,19 +303,33 @@ def test_overseerr_sync_stores_requester_identity_unprotected_by_default(app) ->
                         "email": "viewer@example.com",
                     },
                     "createdAt": "2026-01-01T12:00:00Z",
-                }
+                },
+                {
+                    "id": 45,
+                    "type": "movie",
+                    "status": 2,
+                    "media": {"tmdbId": 200},
+                    "requestedBy": {
+                        "id": 9,
+                        "username": "viewer",
+                        "displayName": "Viewer Name",
+                        "email": "viewer@example.com",
+                    },
+                    "createdAt": "2026-01-02T12:00:00Z",
+                },
             ],
         )
 
         profile = session.scalar(select(RequesterProfile))
-        request_record = session.scalar(select(RequestRecord))
+        request_records = session.scalars(select(RequestRecord)).all()
         assert profile is not None
         assert profile.external_id == "9"
         assert profile.username == "viewer"
         assert profile.display_name == "Viewer Name"
         assert profile.email == "viewer@example.com"
         assert profile.protected is False
-        assert request_record is not None and request_record.requester_id == "9"
+        assert {record.external_request_id for record in request_records} == {44, 45}
+        assert {record.requester_id for record in request_records} == {"9"}
         assert lifecycle.protection_state == "UNPROTECTED"
         assert "PROTECTED_REQUESTER" not in lifecycle.protection_sources
 

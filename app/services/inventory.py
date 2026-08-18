@@ -617,18 +617,26 @@ def sync_overseerr(
     session.query(RequestRecord).filter(RequestRecord.integration_id == integration.id).update(
         {"present": False}
     )
+    records_by_external_id = {
+        record.external_request_id: record
+        for record in session.scalars(
+            select(RequestRecord).where(RequestRecord.integration_id == integration.id)
+        ).all()
+    }
+    profiles_by_external_id = {
+        profile.external_id: profile
+        for profile in session.scalars(
+            select(RequesterProfile).where(RequesterProfile.integration_id == integration.id)
+        ).all()
+    }
     now = utc_now()
     for row in rows:
         request_id = int(row["id"])
-        record = session.scalar(
-            select(RequestRecord).where(
-                RequestRecord.integration_id == integration.id,
-                RequestRecord.external_request_id == request_id,
-            )
-        )
+        record = records_by_external_id.get(request_id)
         if record is None:
             record = RequestRecord(integration_id=integration.id, external_request_id=request_id)
             session.add(record)
+            records_by_external_id[request_id] = record
         media = row.get("media") or {}
         requested_by = row.get("requestedBy") or {}
         record.media_type = str(row.get("type") or media.get("mediaType") or "unknown")
@@ -640,12 +648,7 @@ def sync_overseerr(
         record.updated_at = parse_datetime(row.get("updatedAt"))
         record.present = True
         if record.requester_id:
-            profile = session.scalar(
-                select(RequesterProfile).where(
-                    RequesterProfile.integration_id == integration.id,
-                    RequesterProfile.external_id == record.requester_id,
-                )
-            )
+            profile = profiles_by_external_id.get(record.requester_id)
             if profile is None:
                 profile = RequesterProfile(
                     integration_id=integration.id,
@@ -653,6 +656,7 @@ def sync_overseerr(
                     protected=False,
                 )
                 session.add(profile)
+                profiles_by_external_id[record.requester_id] = profile
             username = requested_by.get("username") or requested_by.get("plexUsername")
             if username:
                 profile.username = str(username).strip()
