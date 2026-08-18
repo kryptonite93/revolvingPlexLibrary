@@ -2,6 +2,7 @@
 {% macro lifecycle_row(row, nested=false) -%}
 {% set item = row.lifecycle %}
 <article class="lifecycle-row{% if nested %} lifecycle-row-nested{% endif %}">
+  <label class="lifecycle-select"><input class="lifecycle-checkbox" type="checkbox" name="lifecycle_ids" value="{{ item.id }}" data-lifecycle-checkbox data-series-key="{{ row.integration.id }}-{{ item.arr_item_id }}" aria-label="Select {{ row.identity.canonical_title }} for manual protection"></label>
   <a class="lifecycle-main" href="/media/{{ item.id }}" aria-label="Open lifecycle case file for {{ row.identity.canonical_title }}">
     <span class="media-spine media-spine-{{ row.identity.media_type|lower }}" aria-hidden="true">{{ 'M' if row.identity.media_type == 'MOVIE' else 'S' ~ (row.identity.season_number or 0) }}</span>
     <span class="lifecycle-title"><strong>{{ row.identity.canonical_title }}</strong><small>{{ row.integration.name }} · {{ row.identity.media_type|title }}{% if row.identity.year %} · {{ row.identity.year }}{% endif %}</small></span>
@@ -23,7 +24,7 @@
     <small>Excluded from retention and legacy bootstrap</small>
     {% else %}
     <span class="decision-label decision-{{ item.decision|lower }}">{% if item.decision == "BLOCKED_STALE" %}Blocked · source data stale{% elif item.decision == "BLOCKED_UNKNOWN" %}Blocked · missing evidence{% else %}{{ item.decision|replace('_', ' ')|title }}{% endif %}</span>
-    <small>{% if item.decision == "BLOCKED_STALE" %}{{ item.decision_reason }}{% else %}{{ item.protection_state|title }} · {{ row.torrent_count }} torrent {{ 'mapping' if row.torrent_count == 1 else 'mappings' }}{% endif %}</small>
+    <small>{% if item.decision == "BLOCKED_STALE" %}{{ item.decision_reason }}{% else %}{{ item.protection_state|title }}{% if item.protection_sources %} · {{ item.protection_sources|join(', ')|replace('_', ' ')|title }}{% endif %} · {{ row.torrent_count }} torrent {{ 'mapping' if row.torrent_count == 1 else 'mappings' }}{% endif %}</small>
     {% endif %}
   </div>
 </article>
@@ -34,7 +35,7 @@
   {% set active_page = "media" %}{% include "_sidebar.html" %}
   <main class="workspace media-workspace">
     <header class="page-header media-header">
-      <div><h1>Media lifecycle</h1><p class="header-support">Read-only case files for every inventoried movie and television series.</p></div>
+      <div><h1>Media lifecycle</h1><p class="header-support">Case files and local protection controls for every inventoried movie and television series.</p></div>
       <span class="status-pill"><span aria-hidden="true"></span>{{ fresh_count }}/{{ freshness|length }} SOURCES FRESH</span>
     </header>
 
@@ -68,7 +69,7 @@
     </details>
 
     <section class="lifecycle-workbench" aria-labelledby="workbench-title">
-      <div class="workbench-heading"><div><h2 id="workbench-title">Decision workbench</h2><p>Filter lifecycle evidence, then open a movie or expand a television series.</p></div><a class="button button-secondary" href="/integrations">Sync sources</a></div>
+      <div class="workbench-heading"><div><h2 id="workbench-title">Decision workbench</h2><p>Filter lifecycle evidence, inspect a title, or protect exactly the results you choose.</p></div><a class="button button-secondary" href="/integrations">Sync sources</a></div>
 
       <form class="media-filters" method="get" action="/media" aria-label="Filter media lifecycles">
         <div class="media-filter-grid">
@@ -84,11 +85,26 @@
       </form>
 
       {% if workbench.entries %}
+      <form class="manual-protection-form" method="post" action="/media/protection" data-manual-protection-form data-filtered-count="{{ workbench.total_lifecycles }}">
+        <input type="hidden" name="csrf" value="{{ csrf_token }}">
+        <input type="hidden" name="search" value="{{ filters.search }}">
+        <input type="hidden" name="source" value="{{ filters.source }}">
+        <input type="hidden" name="media_type" value="{{ filters.media_type }}">
+        <input type="hidden" name="library_state" value="{{ filters.library_state }}">
+        <input type="hidden" name="decision" value="{{ filters.decision }}">
+        <input type="hidden" name="watch_state" value="{{ filters.watch_state }}">
+        <input type="hidden" name="sort" value="{{ filters.sort }}">
+        <section class="manual-protection-bar" aria-labelledby="manual-protection-title">
+          <div class="manual-protection-copy"><h3 id="manual-protection-title">Manual protection</h3><p>Blocks future removal review only inside this manager. Removing it leaves requester, Arr-tag, and instance safeguards unchanged.</p></div>
+          <label class="filtered-selection"><input type="checkbox" name="select_all_filtered" value="yes" data-filtered-selection><span><strong>Select all {{ workbench.total_lifecycles }} filtered {{ 'lifecycle' if workbench.total_lifecycles == 1 else 'lifecycles' }}</strong><small>Includes matching results on every page, not only those visible below.</small></span></label>
+          <div class="selection-actions"><span class="selection-status" data-selection-status role="status" aria-live="polite">No lifecycles selected</span><div><button class="button button-primary" type="submit" name="operation" value="protect" data-selection-action>Protect selection</button><button class="button button-secondary" type="submit" name="operation" value="unprotect" data-selection-action>Remove manual protection</button></div><small>No external service will be changed.</small></div>
+        </section>
       <div class="lifecycle-list">
         {% for entry in workbench.entries %}
           {% if entry.kind == "SERIES" %}
           <details class="series-group">
             <summary class="series-summary">
+              <label class="series-select"><input type="checkbox" data-series-checkbox data-series-key="{{ entry.integration.id }}-{{ entry.rows[0].lifecycle.arr_item_id }}" aria-label="Select every visible season of {{ entry.title }}"></label>
               <span class="series-identity"><span class="media-spine media-spine-season" aria-hidden="true">TV</span><span class="lifecycle-title"><strong>{{ entry.title }}</strong><small>{{ entry.integration.name }} · {{ entry.rows|length }} {{ 'season' if entry.rows|length == 1 else 'seasons' }}</small></span></span>
               <span class="series-counts"><strong>{{ entry.active_count }} downloaded</strong><small>{% if entry.missing_count %}{{ entry.missing_count }} not downloaded{% else %}Every listed season is downloaded{% endif %}</small></span>
               <span class="series-deadline"><small>Next retention deadline</small><strong>{% if entry.next_deadline %}{{ format_date(entry.next_deadline) }}{% else %}No active deadline{% endif %}</strong></span>
@@ -101,6 +117,7 @@
         {% endfor %}
       </div>
       {% if workbench.page_count > 1 %}<nav class="workbench-pagination" aria-label="Media result pages"><span>Page {{ workbench.page }} of {{ workbench.page_count }}</span><div>{% if previous_url %}<a class="button button-secondary" href="{{ previous_url }}">Previous</a>{% endif %}{% if next_url %}<a class="button button-secondary" href="{{ next_url }}">Next</a>{% endif %}</div></nav>{% endif %}
+      </form>
       {% else %}
         {% if active_filter_count %}<div class="empty-state media-empty"><h3>No lifecycles match these filters</h3><p>Clear one or more filters to widen the workbench. Stored inventory has not been changed.</p><a class="button button-primary" href="/media">Clear filters</a></div>
         {% else %}<div class="empty-state media-empty"><h3>The workbench is ready for evidence</h3><p>Enable and synchronize Radarr or Sonarr to create lifecycle case files. Nothing is inferred from folder names alone.</p><a class="button button-primary" href="/integrations">Open integrations</a></div>{% endif %}
@@ -109,3 +126,4 @@
   </main>
 </div>
 {% endblock %}
+{% block scripts %}<script src="{{ url_for('static', path='/media-selection.js') }}" defer></script>{% endblock %}

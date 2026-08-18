@@ -189,6 +189,22 @@ def _item_protection(
     return state, sources
 
 
+def _apply_arr_item_protection(
+    lifecycle: MediaLifecycle,
+    integration: IntegrationInstance,
+    item: dict[str, Any],
+    protected_tag_ids: set[int],
+) -> None:
+    state, sources = _item_protection(integration, item, protected_tag_ids)
+    arr_sources = {"INSTANCE_MODE", "INSTANCE_IGNORED", "ARR_TAG"}
+    preserved = [
+        source for source in (lifecycle.protection_sources or []) if source not in arr_sources
+    ]
+    sources.extend(source for source in preserved if source not in sources)
+    lifecycle.protection_sources = sources
+    lifecycle.protection_state = "PROTECTED" if sources else state
+
+
 def _set_decision(
     lifecycle: MediaLifecycle,
     *,
@@ -369,9 +385,7 @@ def sync_arr(
             )
             lifecycle.current_size = movie_file.get("size") if isinstance(movie_file, dict) else 0
             lifecycle.source_download_ids = _download_ids(history, item_id=arr_id, series=False)
-            lifecycle.protection_state, lifecycle.protection_sources = _item_protection(
-                integration, item, protected_tag_ids
-            )
+            _apply_arr_item_protection(lifecycle, integration, item, protected_tag_ids)
             lifecycle.retention_deadline = retention_deadline(
                 "MOVIE",
                 lifecycle.first_imported_at,
@@ -439,8 +453,8 @@ def sync_arr(
                 lifecycle.source_download_ids = _download_ids(
                     history, item_id=series_id, series=True
                 )
-                lifecycle.protection_state, lifecycle.protection_sources = _item_protection(
-                    integration, series, protected_tag_ids
+                _apply_arr_item_protection(
+                    lifecycle, integration, series, protected_tag_ids
                 )
                 lifecycle.retention_deadline = retention_deadline(
                     "SEASON",
@@ -826,6 +840,29 @@ def set_requester_protection(
     session.flush()
     _apply_request_protection(session)
     recompute_decisions(session)
+
+
+def set_manual_protection(
+    session: Session,
+    lifecycles: list[MediaLifecycle],
+    *,
+    protected: bool,
+) -> list[MediaLifecycle]:
+    changed: list[MediaLifecycle] = []
+    for lifecycle in lifecycles:
+        sources = list(dict.fromkeys(lifecycle.protection_sources or []))
+        was_protected = "MANUAL_SELECTION" in sources
+        if protected and not was_protected:
+            sources.append("MANUAL_SELECTION")
+        elif not protected and was_protected:
+            sources.remove("MANUAL_SELECTION")
+        else:
+            continue
+        lifecycle.protection_sources = sources
+        lifecycle.protection_state = "PROTECTED" if sources else "UNPROTECTED"
+        changed.append(lifecycle)
+    recompute_decisions(session)
+    return changed
 
 
 def sync_qbittorrent(

@@ -19,6 +19,7 @@ def append_event(
     actor_id: str | None,
     payload: dict[str, Any] | None = None,
     correlation_id: str | None = None,
+    flush: bool = True,
 ) -> EventRecord:
     record = EventRecord(
         event_type=event_type,
@@ -30,5 +31,6 @@ def append_event(
         payload=redact(payload or {}),
     )
     session.add(record)
-    session.flush()
+    if flush:
+        session.flush()
     return record

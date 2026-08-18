@@ -9,6 +9,7 @@ from sqlalchemy import select
 
 from app.integrations.qbittorrent import QBittorrentAdapter
 from app.persistence.models import (
+    EventRecord,
     IntegrationInstance,
     InventoryPolicy,
     MediaFileRevision,
@@ -24,6 +25,7 @@ from app.services.inventory import (
     meaningful_playback,
     recompute_decisions,
     retention_deadline,
+    set_manual_protection,
     sync_integration,
     sync_overseerr,
 )
@@ -156,7 +158,7 @@ def test_radarr_sync_normalizes_lifecycle_and_file(app, monkeypatch) -> None:
         session.flush()
         run = sync_integration(session, integration, app.state.credential_cipher)
         session.commit()
-        assert run.status == "SUCCEEDED"
+        assert run.status == "SUCCEEDED", run.sanitized_error
 
     with app.state.database.session_factory() as session:
         identity = session.scalar(select(MediaIdentity))
@@ -249,6 +251,58 @@ def test_sonarr_sync_tracks_download_and_monitoring_state(app, monkeypatch) -> N
         ]
         assert records[1][0].decision == "NOT_IN_LIBRARY"
         assert records[1][0].decision_reason == "No downloaded files are present"
+        set_manual_protection(session, [records[0][0]], protected=True)
+        session.commit()
+        integration_id = records[0][0].integration_id
+
+    with app.state.database.session_factory() as session:
+        integration = session.get(IntegrationInstance, integration_id)
+        assert integration is not None
+        run = sync_integration(session, integration, app.state.credential_cipher)
+        session.commit()
+        assert run.status == "SUCCEEDED", run.sanitized_error
+        protected = session.scalar(
+            select(MediaLifecycle).where(MediaLifecycle.state == "ACTIVE")
+        )
+        assert protected is not None
+        assert "MANUAL_SELECTION" in protected.protection_sources
+        assert protected.protection_state == "PROTECTED"
+
+
+def test_removing_manual_protection_preserves_other_protection_sources(app) -> None:
+    with app.state.database.session_factory() as session:
+        integration = IntegrationInstance(
+            kind="RADARR",
+            name="Shared Radarr",
+            base_url="http://radarr:7878",
+            enabled=True,
+            management_mode="MANAGED",
+            credentials_encrypted=app.state.credential_cipher.encrypt({"api_key": "secret"}),
+        )
+        identity = MediaIdentity(
+            media_type="MOVIE",
+            source_key="tmdb:909",
+            canonical_title="Requested Movie",
+            tmdb_id=909,
+        )
+        session.add_all([integration, identity])
+        session.flush()
+        lifecycle = MediaLifecycle(
+            identity_id=identity.id,
+            integration_id=integration.id,
+            arr_item_id=909,
+            state="ACTIVE",
+            protection_state="PROTECTED",
+            protection_sources=["PROTECTED_REQUESTER", "MANUAL_SELECTION"],
+        )
+        session.add(lifecycle)
+
+        changed = set_manual_protection(session, [lifecycle], protected=False)
+
+        assert changed == [lifecycle]
+        assert lifecycle.protection_sources == ["PROTECTED_REQUESTER"]
+        assert lifecycle.protection_state == "PROTECTED"
+        assert lifecycle.decision == "KEEP_PROTECTED"
 
 
 def test_overseerr_sync_stores_requester_identity_unprotected_by_default(app) -> None:
@@ -899,3 +953,215 @@ def test_media_workbench_groups_tv_and_filters_large_inventory(client, app) -> N
     never_watched = client.get("/media?watch_state=NEVER_WATCHED")
     assert "Season 1" in never_watched.text
     assert "Season 2" not in never_watched.text
+
+
+def test_media_manual_protection_is_selective_reversible_and_visible(client, app) -> None:
+    authenticate(client)
+    with app.state.database.session_factory() as session:
+        radarr = IntegrationInstance(
+            kind="RADARR",
+            name="Shared Radarr",
+            base_url="http://radarr:7878",
+            enabled=True,
+            management_mode="MANAGED",
+            credentials_encrypted=app.state.credential_cipher.encrypt({"api_key": "secret"}),
+        )
+        session.add(radarr)
+        session.flush()
+        lifecycle_ids = []
+        for tmdb_id, title in ((201, "Keep This"), (202, "Review This")):
+            identity = MediaIdentity(
+                media_type="MOVIE",
+                source_key=f"tmdb:{tmdb_id}",
+                canonical_title=title,
+                tmdb_id=tmdb_id,
+            )
+            session.add(identity)
+            session.flush()
+            lifecycle = MediaLifecycle(
+                identity_id=identity.id,
+                integration_id=radarr.id,
+                arr_item_id=tmdb_id,
+                state="ACTIVE",
+                protection_state="UNPROTECTED",
+                protection_sources=[],
+                decision="REVIEW_ELIGIBLE",
+                decision_reason="Retention elapsed",
+            )
+            session.add(lifecycle)
+            session.flush()
+            lifecycle_ids.append(lifecycle.id)
+        session.commit()
+
+    page = client.get("/media")
+    assert "Select all 2 filtered lifecycles" in page.text
+    assert f'value="{lifecycle_ids[0]}"' in page.text
+
+    empty_selection = client.post(
+        "/media/protection",
+        data={"csrf": csrf_from(page), "operation": "protect"},
+        follow_redirects=True,
+    )
+    assert "Select at least one lifecycle or choose all filtered results." in empty_selection.text
+
+    protected = client.post(
+        "/media/protection",
+        data={
+            "csrf": csrf_from(page),
+            "operation": "protect",
+            "lifecycle_ids": [lifecycle_ids[0]],
+        },
+        follow_redirects=True,
+    )
+    assert protected.status_code == 200
+    assert "Manual protection applied to 1 lifecycle" in protected.text
+    with app.state.database.session_factory() as session:
+        first = session.get(MediaLifecycle, lifecycle_ids[0])
+        second = session.get(MediaLifecycle, lifecycle_ids[1])
+        assert first is not None and first.protection_sources == ["MANUAL_SELECTION"]
+        assert first.protection_state == "PROTECTED"
+        assert first.decision == "KEEP_PROTECTED"
+        assert second is not None and second.protection_sources == []
+
+    removed = client.post(
+        "/media/protection",
+        data={
+            "csrf": csrf_from(protected),
+            "operation": "unprotect",
+            "lifecycle_ids": [lifecycle_ids[0]],
+        },
+        follow_redirects=True,
+    )
+    assert "Manual protection removed from 1 lifecycle" in removed.text
+    with app.state.database.session_factory() as session:
+        first = session.get(MediaLifecycle, lifecycle_ids[0])
+        assert first is not None and "MANUAL_SELECTION" not in first.protection_sources
+        assert first.protection_state == "UNPROTECTED"
+
+
+def test_media_manual_protection_can_apply_to_every_filtered_result(client, app) -> None:
+    authenticate(client)
+    with app.state.database.session_factory() as session:
+        sonarr = IntegrationInstance(
+            kind="SONARR",
+            name="Shared Sonarr",
+            base_url="http://sonarr:8989",
+            enabled=True,
+            management_mode="MANAGED",
+            credentials_encrypted=app.state.credential_cipher.encrypt({"api_key": "secret"}),
+        )
+        radarr = IntegrationInstance(
+            kind="RADARR",
+            name="Shared Radarr",
+            base_url="http://radarr:7878",
+            enabled=True,
+            management_mode="MANAGED",
+            credentials_encrypted=app.state.credential_cipher.encrypt({"api_key": "secret"}),
+        )
+        session.add_all([sonarr, radarr])
+        session.flush()
+        active_sonarr_ids = []
+        for index in range(51):
+            identity = MediaIdentity(
+                media_type="SEASON",
+                source_key=f"sonarr:{1000 + index}:season:1",
+                canonical_title=f"Filtered Show {index:02d} · Season 1",
+                series_tvdb_id=1000 + index,
+                season_number=1,
+            )
+            session.add(identity)
+            session.flush()
+            lifecycle = MediaLifecycle(
+                identity_id=identity.id,
+                integration_id=sonarr.id,
+                arr_item_id=1000 + index,
+                state="ACTIVE",
+                protection_state="UNPROTECTED",
+                protection_sources=[],
+                decision="REVIEW_ELIGIBLE",
+                decision_reason="Retention elapsed",
+            )
+            session.add(lifecycle)
+            session.flush()
+            active_sonarr_ids.append(lifecycle.id)
+        missing_identity = MediaIdentity(
+            media_type="SEASON",
+            source_key="sonarr:2000:season:1",
+            canonical_title="Missing Show · Season 1",
+            series_tvdb_id=2000,
+            season_number=1,
+        )
+        movie_identity = MediaIdentity(
+            media_type="MOVIE",
+            source_key="tmdb:3000",
+            canonical_title="Other Movie",
+            tmdb_id=3000,
+        )
+        session.add_all([missing_identity, movie_identity])
+        session.flush()
+        missing = MediaLifecycle(
+            identity_id=missing_identity.id,
+            integration_id=sonarr.id,
+            arr_item_id=2000,
+            state="MISSING",
+            protection_state="UNPROTECTED",
+            protection_sources=[],
+            decision="NOT_IN_LIBRARY",
+            decision_reason="No downloaded files are present",
+        )
+        other_source = MediaLifecycle(
+            identity_id=movie_identity.id,
+            integration_id=radarr.id,
+            arr_item_id=3000,
+            state="ACTIVE",
+            protection_state="UNPROTECTED",
+            protection_sources=[],
+            decision="REVIEW_ELIGIBLE",
+            decision_reason="Retention elapsed",
+        )
+        session.add_all([missing, other_source])
+        session.flush()
+        missing_id = missing.id
+        other_source_id = other_source.id
+        session.commit()
+        sonarr_id = sonarr.id
+
+    page = client.get(f"/media?source={sonarr_id}&library_state=ACTIVE")
+    assert "Select all 51 filtered lifecycles" in page.text
+    assert "Page 1 of 2" in page.text
+    response = client.post(
+        "/media/protection",
+        data={
+            "csrf": csrf_from(page),
+            "operation": "protect",
+            "select_all_filtered": "yes",
+            "source": sonarr_id,
+            "library_state": "ACTIVE",
+        },
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    assert "Manual protection applied to all 51 filtered lifecycles" in response.text
+    with app.state.database.session_factory() as session:
+        lifecycles = {item.id: item for item in session.scalars(select(MediaLifecycle)).all()}
+        assert all(
+            "MANUAL_SELECTION" in lifecycles[lifecycle_id].protection_sources
+            for lifecycle_id in active_sonarr_ids
+        )
+        assert "MANUAL_SELECTION" not in lifecycles[missing_id].protection_sources
+        assert "MANUAL_SELECTION" not in lifecycles[other_source_id].protection_sources
+        events = session.scalars(
+            select(EventRecord).where(
+                EventRecord.event_type.in_(
+                    ("media.manual_protection_changed", "media.manual_protection_batch_changed")
+                )
+            )
+        ).all()
+        assert len(events) == 52
+        assert len({event.correlation_id for event in events}) == 1
+        batch = next(
+            event for event in events if event.event_type == "media.manual_protection_batch_changed"
+        )
+        assert batch.payload["selection_scope"] == "filtered"
+        assert batch.payload["matched"] == 51
+        assert batch.payload["changed"] == 51

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import uuid
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlencode
 
 import httpx
 from fastapi import Depends, FastAPI, Form, HTTPException, Query, Request, status
@@ -55,6 +56,7 @@ from app.services.inventory import (
     get_inventory_policy,
     preview_integration,
     recompute_decisions,
+    set_manual_protection,
     set_requester_protection,
     source_is_fresh,
     sync_integration,
@@ -167,12 +169,69 @@ def _integrations_redirect(
     )
 
 
-def _media_redirect(*, message: str | None = None, error: str | None = None):
+def _media_redirect(
+    *,
+    message: str | None = None,
+    error: str | None = None,
+    query: dict[str, str] | None = None,
+):
     key = "error" if error else "message"
     value = error or message or ""
+    params = {name: item for name, item in (query or {}).items() if item}
+    params[key] = value
     return RedirectResponse(
-        f"/media?{key}={quote_plus(value)}", status_code=status.HTTP_303_SEE_OTHER
+        f"/media?{urlencode(params)}", status_code=status.HTTP_303_SEE_OTHER
     )
+
+
+def _media_lifecycle_query(
+    *,
+    search: str = "",
+    source: str = "",
+    media_type: str = "",
+    library_state: str = "",
+    decision: str = "",
+    watch_state: str = "",
+):
+    query = (
+        select(MediaLifecycle, MediaIdentity, IntegrationInstance)
+        .join(MediaIdentity, MediaLifecycle.identity_id == MediaIdentity.id)
+        .join(
+            IntegrationInstance,
+            MediaLifecycle.integration_id == IntegrationInstance.id,
+        )
+    )
+    normalized_search = search.strip()[:120]
+    if normalized_search:
+        query = query.where(
+            MediaIdentity.canonical_title.ilike(f"%{normalized_search}%")
+        )
+    if source:
+        query = query.where(IntegrationInstance.id == source)
+    if media_type in {"MOVIE", "SEASON"}:
+        query = query.where(MediaIdentity.media_type == media_type)
+    if library_state in {"ACTIVE", "MISSING"}:
+        query = query.where(MediaLifecycle.state == library_state)
+    if decision in {
+        "KEEP_PROTECTED",
+        "KEEP_RETAINED",
+        "REVIEW_ELIGIBLE",
+        "BLOCKED_STALE",
+        "BLOCKED_UNKNOWN",
+    }:
+        query = query.where(
+            MediaLifecycle.decision == decision,
+            MediaLifecycle.state == "ACTIVE",
+        )
+    if watch_state == "WATCHED":
+        query = query.where(
+            MediaLifecycle.watched.is_(True), MediaLifecycle.state == "ACTIVE"
+        )
+    elif watch_state == "NEVER_WATCHED":
+        query = query.where(
+            MediaLifecycle.watched.is_(False), MediaLifecycle.state == "ACTIVE"
+        )
+    return query, normalized_search
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -988,44 +1047,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         session: Session = Depends(_session),
     ):
         admin = _require_admin(request, session)
-        lifecycle_query = (
-            select(MediaLifecycle, MediaIdentity, IntegrationInstance)
-            .join(MediaIdentity, MediaLifecycle.identity_id == MediaIdentity.id)
-            .join(
-                IntegrationInstance,
-                MediaLifecycle.integration_id == IntegrationInstance.id,
-            )
+        lifecycle_query, normalized_search = _media_lifecycle_query(
+            search=search,
+            source=source,
+            media_type=media_type,
+            library_state=library_state,
+            decision=decision,
+            watch_state=watch_state,
         )
-        normalized_search = search.strip()
-        if normalized_search:
-            lifecycle_query = lifecycle_query.where(
-                MediaIdentity.canonical_title.ilike(f"%{normalized_search}%")
-            )
-        if source:
-            lifecycle_query = lifecycle_query.where(IntegrationInstance.id == source)
-        if media_type in {"MOVIE", "SEASON"}:
-            lifecycle_query = lifecycle_query.where(MediaIdentity.media_type == media_type)
-        if library_state in {"ACTIVE", "MISSING"}:
-            lifecycle_query = lifecycle_query.where(MediaLifecycle.state == library_state)
-        if decision in {
-            "KEEP_PROTECTED",
-            "KEEP_RETAINED",
-            "REVIEW_ELIGIBLE",
-            "BLOCKED_STALE",
-            "BLOCKED_UNKNOWN",
-        }:
-            lifecycle_query = lifecycle_query.where(
-                MediaLifecycle.decision == decision,
-                MediaLifecycle.state == "ACTIVE",
-            )
-        if watch_state == "WATCHED":
-            lifecycle_query = lifecycle_query.where(
-                MediaLifecycle.watched.is_(True), MediaLifecycle.state == "ACTIVE"
-            )
-        elif watch_state == "NEVER_WATCHED":
-            lifecycle_query = lifecycle_query.where(
-                MediaLifecycle.watched.is_(False), MediaLifecycle.state == "ACTIVE"
-            )
         records = session.execute(lifecycle_query).all()
         mapping_counts = dict(
             session.execute(
@@ -1098,6 +1127,123 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "policy": policy,
             },
         )
+
+    @app.post("/media/protection")
+    def media_protection_update(
+        request: Request,
+        operation: str = Form(),
+        lifecycle_ids: list[str] = Form(default=[]),
+        select_all_filtered: str = Form(""),
+        search: str = Form(""),
+        source: str = Form(""),
+        media_type: str = Form(""),
+        library_state: str = Form(""),
+        decision: str = Form(""),
+        watch_state: str = Form(""),
+        sort: str = Form("retention_soonest"),
+        csrf: str = Form(),
+        session: Session = Depends(_session),
+    ):
+        verify_csrf(request, csrf)
+        admin = _require_admin(request, session)
+        valid_sorts = {"retention_soonest", "retention_latest", "title", "imported_newest"}
+        normalized_sort = sort if sort in valid_sorts else "retention_soonest"
+        filter_query = {
+            "search": search.strip()[:120],
+            "source": source,
+            "media_type": media_type,
+            "library_state": library_state,
+            "decision": decision,
+            "watch_state": watch_state,
+            "sort": normalized_sort,
+        }
+        if operation not in {"protect", "unprotect"}:
+            return _media_redirect(
+                error="Choose whether to apply or remove manual protection.",
+                query=filter_query,
+            )
+
+        selection_scope = "filtered" if select_all_filtered == "yes" else "selected"
+        if selection_scope == "filtered":
+            lifecycle_query, _normalized_search = _media_lifecycle_query(
+                search=search,
+                source=source,
+                media_type=media_type,
+                library_state=library_state,
+                decision=decision,
+                watch_state=watch_state,
+            )
+            lifecycles = [record[0] for record in session.execute(lifecycle_query).all()]
+        else:
+            selected_ids = list(dict.fromkeys(lifecycle_ids))
+            lifecycles = (
+                session.scalars(
+                    select(MediaLifecycle).where(MediaLifecycle.id.in_(selected_ids))
+                ).all()
+                if selected_ids
+                else []
+            )
+        if not lifecycles:
+            return _media_redirect(
+                error="Select at least one lifecycle or choose all filtered results.",
+                query=filter_query,
+            )
+
+        target = operation == "protect"
+        changed = set_manual_protection(session, lifecycles, protected=target)
+        correlation_id = str(uuid.uuid4())
+        for lifecycle in changed:
+            append_event(
+                session,
+                event_type="media.manual_protection_changed",
+                entity_type="media_lifecycle",
+                entity_id=lifecycle.id,
+                actor_type="admin",
+                actor_id=admin.id,
+                correlation_id=correlation_id,
+                payload={"protected": target, "source": "MANUAL_SELECTION"},
+                flush=False,
+            )
+        append_event(
+            session,
+            event_type="media.manual_protection_batch_changed",
+            entity_type="media_selection",
+            entity_id=None,
+            actor_type="admin",
+            actor_id=admin.id,
+            correlation_id=correlation_id,
+            payload={
+                "protected": target,
+                "selection_scope": selection_scope,
+                "matched": len(lifecycles),
+                "changed": len(changed),
+                "filters": filter_query if selection_scope == "filtered" else {},
+            },
+            flush=False,
+        )
+        session.commit()
+
+        matched = len(lifecycles)
+        changed_count = len(changed)
+        matched_noun = "lifecycle" if matched == 1 else "lifecycles"
+        changed_noun = "lifecycle" if changed_count == 1 else "lifecycles"
+        if changed_count == 0:
+            message = f"No manual protection changes were needed for {matched} {matched_noun}."
+        elif selection_scope == "filtered" and changed_count == matched:
+            action = "applied to" if target else "removed from"
+            message = (
+                f"Manual protection {action} all {matched} filtered {matched_noun}."
+            )
+        elif changed_count == matched:
+            action = "applied to" if target else "removed from"
+            message = f"Manual protection {action} {changed_count} {changed_noun}."
+        else:
+            action = "applied to" if target else "removed from"
+            message = (
+                f"Manual protection {action} {changed_count} of {matched} selected "
+                f"{matched_noun}; the remainder already had the requested state."
+            )
+        return _media_redirect(message=message, query=filter_query)
 
     @app.post("/media/policy")
     def media_policy_update(
