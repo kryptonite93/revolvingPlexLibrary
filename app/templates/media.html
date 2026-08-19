@@ -2,10 +2,10 @@
 {% macro lifecycle_row(row, nested=false) -%}
 {% set item = row.lifecycle %}
 <article class="lifecycle-row{% if nested %} lifecycle-row-nested{% endif %}">
-  <label class="lifecycle-select"><input class="lifecycle-checkbox" type="checkbox" name="lifecycle_ids" value="{{ item.id }}" data-lifecycle-checkbox data-series-key="{{ row.integration.id }}-{{ item.arr_item_id }}" aria-label="Select {{ row.identity.canonical_title }} for manual protection"></label>
-  <a class="lifecycle-main" href="/media/{{ item.id }}" aria-label="Open lifecycle case file for {{ row.identity.canonical_title }}">
-    <span class="media-spine media-spine-{{ row.identity.media_type|lower }}" aria-hidden="true">{{ 'M' if row.identity.media_type == 'MOVIE' else 'S' ~ (row.identity.season_number or 0) }}</span>
-    <span class="lifecycle-title"><strong>{{ row.identity.canonical_title }}</strong><small>{{ row.integration.name }} · {{ row.identity.media_type|title }}{% if row.identity.year %} · {{ row.identity.year }}{% endif %}</small></span>
+  <label class="lifecycle-select"><input class="lifecycle-checkbox" type="checkbox" name="lifecycle_ids" value="{{ item.id }}" data-lifecycle-checkbox data-series-key="{{ row.integration.id }}-{{ item.arr_item_id }}" aria-label="Select {{ row.display_title }} for manual protection"></label>
+  <a class="lifecycle-main" href="/media/{{ item.id }}" aria-label="Open lifecycle case file for {{ row.display_title }}">
+    <span class="media-spine media-spine-{{ row.identity.media_type|lower }}" aria-hidden="true">{{ row.spine_label }}</span>
+    <span class="lifecycle-title"><strong>{{ row.display_title }}</strong><small>{{ row.integration.name }} · {{ row.media_type_label }}{% if row.identity.year %} · {{ row.identity.year }}{% endif %}</small></span>
   </a>
   <div class="lifecycle-track" aria-label="Lifecycle evidence">
     {% if item.state == "MISSING" %}
@@ -94,7 +94,7 @@
           <details class="series-group">
             <summary class="series-summary">
               <label class="series-select"><input type="checkbox" data-series-checkbox data-series-key="{{ entry.integration.id }}-{{ entry.rows[0].lifecycle.arr_item_id }}" aria-label="Select every visible season of {{ entry.title }}"></label>
-              <span class="series-identity"><span class="media-spine media-spine-season" aria-hidden="true">TV</span><span class="lifecycle-title"><strong>{{ entry.title }}</strong><small>{{ entry.integration.name }} · {{ entry.rows|length }} {{ 'season' if entry.rows|length == 1 else 'seasons' }}</small>{% if entry.protected_count %}<span class="series-protection-state">{{ entry.protected_count }} of {{ entry.rows|length }} {{ 'season' if entry.rows|length == 1 else 'seasons' }} protected</span>{% endif %}</span></span>
+              <span class="series-identity"><span class="media-spine media-spine-season" aria-hidden="true">TV</span><span class="lifecycle-title"><strong>{{ entry.title }}</strong><small>{{ entry.integration.name }} · {{ entry.regular_season_count }} {{ 'season' if entry.regular_season_count == 1 else 'seasons' }}{% if entry.has_specials %} + specials{% endif %}</small>{% if entry.protected_count %}<span class="series-protection-state">{% if entry.has_specials %}{{ entry.protected_count }} of {{ entry.rows|length }} groups protected{% else %}{{ entry.protected_count }} of {{ entry.rows|length }} {{ 'season' if entry.rows|length == 1 else 'seasons' }} protected{% endif %}</span>{% endif %}</span></span>
               <span class="series-counts"><strong>{{ entry.active_count }} downloaded</strong><small>{% if entry.missing_count %}{{ entry.missing_count }} not downloaded{% else %}Every listed season is downloaded{% endif %}</small></span>
               <span class="series-deadline"><small>Next retention deadline</small><strong>{% if entry.next_deadline %}{{ format_date(entry.next_deadline) }}{% else %}No active deadline{% endif %}</strong></span>
             </summary>

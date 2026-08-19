@@ -341,6 +341,12 @@ p { text-wrap: pretty; }
 .evidence-list > div { display: grid; gap: 0.32rem; padding: 1rem 0; border-bottom: 1px solid var(--border); }
 .evidence-list > div > span, .evidence-list > div > small { color: var(--muted); font-size: 0.78rem; line-height: 1.45; }
 .evidence-list > div > strong { overflow-wrap: anywhere; font-size: 0.88rem; }
+.file-group-title { margin: 1rem 0 0; color: var(--muted); font-size: 0.76rem; font-weight: 760; }
+.file-state-current { color: var(--primary); font-style: normal; font-weight: 760; }
+.revision-history { margin-top: 0.8rem; border-top: 1px solid var(--border); }
+.revision-history > summary { width: fit-content; padding: 0.9rem 0; color: var(--muted); cursor: pointer; font-size: 0.8rem; font-weight: 740; }
+.revision-history > summary:hover, .revision-history[open] > summary { color: var(--primary); }
+.revision-history > p { max-width: 58ch; margin: 0 0 0.25rem; color: var(--muted); font-size: 0.76rem; line-height: 1.5; }
 .freshness-ledger { margin-top: 4.5rem; }
 .freshness-ledger > div:last-child { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); }
 .freshness-entry { display: grid; gap: 0.3rem; padding: 1.2rem 1.2rem 1.2rem 0; border-bottom: 1px solid var(--border); }

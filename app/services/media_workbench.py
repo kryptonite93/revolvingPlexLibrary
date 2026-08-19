@@ -14,6 +14,26 @@ class WorkbenchRow:
     integration: IntegrationInstance
     torrent_count: int
 
+    @property
+    def display_title(self) -> str:
+        if self.identity.media_type == "SEASON" and self.identity.season_number == 0:
+            return f"{_series_title(self.identity)} · Specials"
+        return self.identity.canonical_title
+
+    @property
+    def spine_label(self) -> str:
+        if self.identity.media_type == "MOVIE":
+            return "M"
+        if self.identity.season_number == 0:
+            return "SP"
+        return f"S{self.identity.season_number or 0}"
+
+    @property
+    def media_type_label(self) -> str:
+        if self.identity.media_type == "SEASON" and self.identity.season_number == 0:
+            return "Specials"
+        return self.identity.media_type.title()
+
 
 @dataclass
 class WorkbenchEntry:
@@ -37,11 +57,20 @@ class WorkbenchEntry:
         )
 
     @property
+    def regular_season_count(self) -> int:
+        return sum(row.identity.season_number != 0 for row in self.rows)
+
+    @property
+    def has_specials(self) -> bool:
+        return any(row.identity.season_number == 0 for row in self.rows)
+
+    @property
     def next_deadline(self) -> datetime | None:
         deadlines = [
             row.lifecycle.retention_deadline
             for row in self.rows
-            if row.lifecycle.retention_deadline is not None
+            if row.lifecycle.state == "ACTIVE"
+            and row.lifecycle.retention_deadline is not None
         ]
         return min(deadlines) if deadlines else None
 
@@ -50,7 +79,7 @@ class WorkbenchEntry:
         imports = [
             row.lifecycle.first_imported_at
             for row in self.rows
-            if row.lifecycle.first_imported_at is not None
+            if row.lifecycle.state == "ACTIVE" and row.lifecycle.first_imported_at is not None
         ]
         return max(imports) if imports else None
 
@@ -65,6 +94,8 @@ class WorkbenchPage:
 
 
 def _series_title(identity: MediaIdentity) -> str:
+    if identity.canonical_title.endswith(" · Specials"):
+        return identity.canonical_title.removesuffix(" · Specials")
     marker = " · Season "
     return identity.canonical_title.rsplit(marker, 1)[0]
 

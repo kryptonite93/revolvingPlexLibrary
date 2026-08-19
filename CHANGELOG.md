@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Preserved each season's actual meaningful-watch date while applying forward TV retention resets separately.
+- Labeled Sonarr season zero as Specials and excluded missing seasons from series retention summaries.
+- Separated current Arr files from clearly labeled, collapsed historical revisions on media detail pages.
 - Consolidated connection, retention, and freshness configuration under a Settings page at the bottom of the navigation.
 - Simplified qBittorrent authentication to API keys for version 5.2 and newer.
 - Added reversible manual protection for selected media or every lifecycle matching the current Media filters.

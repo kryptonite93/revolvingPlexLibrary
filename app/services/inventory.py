@@ -386,12 +386,16 @@ def sync_arr(
             lifecycle.current_size = movie_file.get("size") if isinstance(movie_file, dict) else 0
             lifecycle.source_download_ids = _download_ids(history, item_id=arr_id, series=False)
             _apply_arr_item_protection(lifecycle, integration, item, protected_tag_ids)
-            lifecycle.retention_deadline = retention_deadline(
-                "MOVIE",
-                lifecycle.first_imported_at,
-                lifecycle.last_meaningful_watch_at,
-                never_watched_weeks=policy.never_watched_weeks,
-                watched_weeks=policy.watched_weeks,
+            lifecycle.retention_deadline = (
+                retention_deadline(
+                    "MOVIE",
+                    lifecycle.first_imported_at,
+                    lifecycle.last_meaningful_watch_at,
+                    never_watched_weeks=policy.never_watched_weeks,
+                    watched_weeks=policy.watched_weeks,
+                )
+                if lifecycle.state == "ACTIVE"
+                else None
             )
             lifecycle.last_synced_at = now
             _set_decision(lifecycle)
@@ -415,13 +419,14 @@ def sync_arr(
             for season in series.get("seasons", []):
                 number = int(season.get("seasonNumber", 0))
                 season_files = [f for f in series_files if int(f.get("seasonNumber", -1)) == number]
+                season_title = "Specials" if number == 0 else f"Season {number}"
                 identity = _identity(
                     session,
                     media_type="SEASON",
                     source_key=f"tvdb:{tvdb_id}:season:{number}"
                     if tvdb_id
                     else f"sonarr:{integration.id}:{series_id}:{number}",
-                    title=f"{series.get('title') or 'Untitled series'} · Season {number}",
+                    title=f"{series.get('title') or 'Untitled series'} · {season_title}",
                     tvdb_id=tvdb_id,
                     series_tvdb_id=tvdb_id,
                     season_number=number,
@@ -456,12 +461,16 @@ def sync_arr(
                 _apply_arr_item_protection(
                     lifecycle, integration, series, protected_tag_ids
                 )
-                lifecycle.retention_deadline = retention_deadline(
-                    "SEASON",
-                    lifecycle.first_imported_at,
-                    lifecycle.last_meaningful_watch_at,
-                    never_watched_weeks=policy.never_watched_weeks,
-                    watched_weeks=policy.watched_weeks,
+                lifecycle.retention_deadline = (
+                    retention_deadline(
+                        "SEASON",
+                        lifecycle.first_imported_at,
+                        lifecycle.last_meaningful_watch_at,
+                        never_watched_weeks=policy.never_watched_weeks,
+                        watched_weeks=policy.watched_weeks,
+                    )
+                    if lifecycle.state == "ACTIVE"
+                    else None
                 )
                 lifecycle.last_synced_at = now
                 _set_decision(lifecycle)
@@ -570,11 +579,10 @@ def _apply_playback(session: Session, policy: InventoryPolicy) -> None:
                 | (Playback.parent_rating_key == lifecycle.plex_rating_key),
             )
         )
-    effective_watches: dict[str, datetime | None] = {}
     for lifecycle, _identity_item in records:
         direct = direct_watches[lifecycle.id]
         imported_at = lifecycle.first_imported_at
-        effective_watches[lifecycle.id] = (
+        actual_watch = (
             direct
             if lifecycle.state == "ACTIVE"
             and direct
@@ -582,18 +590,34 @@ def _apply_playback(session: Session, policy: InventoryPolicy) -> None:
             and as_utc(direct) >= as_utc(imported_at)
             else None
         )
-    series_groups: dict[int, list[tuple[MediaLifecycle, MediaIdentity]]] = {}
+        lifecycle.last_meaningful_watch_at = actual_watch
+        lifecycle.watched = actual_watch is not None
+    _recalculate_retention(records, policy)
+
+
+def _recalculate_retention(
+    records: list[tuple[MediaLifecycle, MediaIdentity]], policy: InventoryPolicy
+) -> None:
+    effective_watches = {
+        lifecycle.id: lifecycle.last_meaningful_watch_at for lifecycle, _identity in records
+    }
+    series_groups: dict[
+        tuple[str, int], list[tuple[MediaLifecycle, MediaIdentity]]
+    ] = {}
     for lifecycle, identity in records:
         if identity.media_type == "SEASON" and identity.series_tvdb_id is not None:
-            series_groups.setdefault(identity.series_tvdb_id, []).append((lifecycle, identity))
+            key = (lifecycle.integration_id, identity.series_tvdb_id)
+            series_groups.setdefault(key, []).append((lifecycle, identity))
     for seasons in series_groups.values():
         latest_prior: datetime | None = None
         for lifecycle, _identity in sorted(
             seasons, key=lambda record: record[1].season_number or 0
         ):
-            direct = direct_watches.get(lifecycle.id)
-            if direct and (latest_prior is None or as_utc(direct) > as_utc(latest_prior)):
-                latest_prior = direct
+            actual_watch = lifecycle.last_meaningful_watch_at
+            if actual_watch and (
+                latest_prior is None or as_utc(actual_watch) > as_utc(latest_prior)
+            ):
+                latest_prior = actual_watch
             imported_at = lifecycle.first_imported_at
             if (
                 lifecycle.state == "ACTIVE"
@@ -602,18 +626,17 @@ def _apply_playback(session: Session, policy: InventoryPolicy) -> None:
                 and as_utc(latest_prior) >= as_utc(imported_at)
             ):
                 effective_watches[lifecycle.id] = latest_prior
-            elif direct is None:
-                effective_watches[lifecycle.id] = None
-    for lifecycle, _identity_item in records:
-        latest = effective_watches.get(lifecycle.id)
-        lifecycle.last_meaningful_watch_at = latest
-        lifecycle.watched = latest is not None
-        lifecycle.retention_deadline = retention_deadline(
-            "",
-            lifecycle.first_imported_at,
-            latest,
-            never_watched_weeks=policy.never_watched_weeks,
-            watched_weeks=policy.watched_weeks,
+    for lifecycle, _identity in records:
+        lifecycle.retention_deadline = (
+            retention_deadline(
+                "",
+                lifecycle.first_imported_at,
+                effective_watches.get(lifecycle.id),
+                never_watched_weeks=policy.never_watched_weeks,
+                watched_weeks=policy.watched_weeks,
+            )
+            if lifecycle.state == "ACTIVE"
+            else None
         )
 
 
@@ -1150,7 +1173,12 @@ def recompute_decisions(session: Session) -> None:
         or not source_is_fresh(freshness_by_integration[item.id])
     )
     all_fresh = bool(required) and not stale_sources
-    for lifecycle in session.scalars(select(MediaLifecycle)).all():
+    records = session.execute(
+        select(MediaLifecycle, MediaIdentity).join(
+            MediaIdentity, MediaLifecycle.identity_id == MediaIdentity.id
+        )
+    ).all()
+    for lifecycle, _identity in records:
         if (
             lifecycle.first_imported_at
             and lifecycle.last_meaningful_watch_at
@@ -1158,13 +1186,8 @@ def recompute_decisions(session: Session) -> None:
         ):
             lifecycle.last_meaningful_watch_at = None
             lifecycle.watched = False
-        lifecycle.retention_deadline = retention_deadline(
-            "",
-            lifecycle.first_imported_at,
-            lifecycle.last_meaningful_watch_at,
-            never_watched_weeks=policy.never_watched_weeks,
-            watched_weeks=policy.watched_weeks,
-        )
+    _recalculate_retention(records, policy)
+    for lifecycle, _identity in records:
         _set_decision(
             lifecycle,
             all_required_sources_fresh=all_fresh,

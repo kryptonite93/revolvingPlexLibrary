@@ -269,6 +269,65 @@ def test_sonarr_sync_tracks_download_and_monitoring_state(app, monkeypatch) -> N
         assert protected.protection_state == "PROTECTED"
 
 
+def test_sonarr_sync_names_specials_and_clears_missing_retention(app, monkeypatch) -> None:
+    payload = {
+        "items": [
+            {
+                "id": 7,
+                "title": "The Show",
+                "tvdbId": 100,
+                "seasons": [{"seasonNumber": 0, "monitored": True}],
+            }
+        ],
+        "files": [
+            {
+                "id": 11,
+                "seriesId": 7,
+                "seasonNumber": 0,
+                "size": 1234,
+                "dateAdded": "2020-01-10T12:00:00Z",
+            }
+        ],
+        "episodes": [],
+        "history": [],
+        "tags": [],
+    }
+    monkeypatch.setattr(
+        "app.services.inventory.ArrAdapter.inventory",
+        lambda _adapter, _kind: payload,
+    )
+    with app.state.database.session_factory() as session:
+        integration = IntegrationInstance(
+            kind="SONARR",
+            name="Sonarr",
+            base_url="http://sonarr:8989",
+            enabled=True,
+            management_mode="MANAGED",
+            credentials_encrypted=app.state.credential_cipher.encrypt({"api_key": "secret"}),
+        )
+        session.add(integration)
+        session.flush()
+        first_run = sync_integration(session, integration, app.state.credential_cipher)
+        session.commit()
+        assert first_run.status == "SUCCEEDED"
+        integration_id = integration.id
+
+    payload["files"] = []
+    with app.state.database.session_factory() as session:
+        integration = session.get(IntegrationInstance, integration_id)
+        assert integration is not None
+        second_run = sync_integration(session, integration, app.state.credential_cipher)
+        session.commit()
+        assert second_run.status == "SUCCEEDED"
+
+    with app.state.database.session_factory() as session:
+        identity = session.scalar(select(MediaIdentity))
+        lifecycle = session.scalar(select(MediaLifecycle))
+        assert identity is not None and identity.canonical_title == "The Show · Specials"
+        assert lifecycle is not None and lifecycle.state == "MISSING"
+        assert lifecycle.retention_deadline is None
+
+
 def test_removing_manual_protection_preserves_other_protection_sources(app) -> None:
     with app.state.database.session_factory() as session:
         integration = IntegrationInstance(
@@ -582,7 +641,103 @@ def test_tv_playback_resets_current_and_later_imported_seasons(app) -> None:
         )
         assert lifecycles[0].last_meaningful_watch_at is None
         assert lifecycles[1].last_meaningful_watch_at == watched_at.replace(tzinfo=None)
-        assert lifecycles[2].last_meaningful_watch_at == watched_at.replace(tzinfo=None)
+        assert lifecycles[2].last_meaningful_watch_at is None
+        assert lifecycles[2].retention_deadline == watched_at.replace(
+            tzinfo=None
+        ) + timedelta(weeks=8)
+
+
+def test_tv_forward_reset_preserves_each_seasons_actual_watch_date(app) -> None:
+    season_11_watch = datetime(2026, 6, 29, 12, tzinfo=UTC)
+    season_12_watch = datetime(2025, 9, 16, 12, tzinfo=UTC)
+    with app.state.database.session_factory() as session:
+        integration = IntegrationInstance(
+            kind="SONARR",
+            name="TV",
+            base_url="http://sonarr:8989",
+            enabled=True,
+            management_mode="MANAGED",
+            credentials_encrypted=app.state.credential_cipher.encrypt({"api_key": "secret"}),
+        )
+        session.add(integration)
+        session.flush()
+        lifecycles = []
+        for season_number, imported_at in (
+            (11, datetime(2024, 2, 6, 12, tzinfo=UTC)),
+            (12, datetime(2025, 6, 3, 12, tzinfo=UTC)),
+        ):
+            identity = MediaIdentity(
+                media_type="SEASON",
+                source_key=f"tvdb:100:season:{season_number}",
+                canonical_title=f"Below Deck · Season {season_number}",
+                series_tvdb_id=100,
+                season_number=season_number,
+            )
+            session.add(identity)
+            session.flush()
+            lifecycle = MediaLifecycle(
+                identity_id=identity.id,
+                integration_id=integration.id,
+                arr_item_id=7,
+                state="ACTIVE",
+                plex_rating_key=f"season-{season_number}",
+                first_imported_at=imported_at,
+            )
+            session.add(lifecycle)
+            lifecycles.append(lifecycle)
+        session.add_all(
+            [
+                Playback(
+                    integration_id=integration.id,
+                    external_row_id="watch-11",
+                    parent_rating_key="season-11",
+                    media_type="episode",
+                    watched_at=season_11_watch,
+                    duration_seconds=700,
+                    progress_percent=20,
+                    meaningful=True,
+                ),
+                Playback(
+                    integration_id=integration.id,
+                    external_row_id="watch-12",
+                    parent_rating_key="season-12",
+                    media_type="episode",
+                    watched_at=season_12_watch,
+                    duration_seconds=700,
+                    progress_percent=20,
+                    meaningful=True,
+                ),
+            ]
+        )
+
+        _apply_playback(
+            session,
+            InventoryPolicy(
+                meaningful_minutes=10,
+                meaningful_percent=10,
+                never_watched_weeks=16,
+                watched_weeks=8,
+                protected_tag_name="retention-protected",
+                tautulli_fresh_minutes=15,
+                torrent_fresh_minutes=15,
+                arr_fresh_minutes=60,
+                overseerr_fresh_minutes=60,
+                plex_fresh_minutes=60,
+            ),
+        )
+
+        assert lifecycles[0].last_meaningful_watch_at == season_11_watch.replace(tzinfo=None)
+        assert lifecycles[1].last_meaningful_watch_at == season_12_watch.replace(tzinfo=None)
+        assert lifecycles[1].retention_deadline == season_11_watch.replace(
+            tzinfo=None
+        ) + timedelta(weeks=8)
+
+        recompute_decisions(session)
+        assert lifecycles[0].last_meaningful_watch_at == season_11_watch.replace(tzinfo=None)
+        assert lifecycles[1].last_meaningful_watch_at == season_12_watch.replace(tzinfo=None)
+        assert lifecycles[1].retention_deadline == season_11_watch.replace(
+            tzinfo=None
+        ) + timedelta(weeks=8)
 
 
 def test_tv_playback_does_not_predate_later_season_import(app) -> None:
@@ -715,6 +870,73 @@ def test_stale_decision_names_the_blocking_integration(client, app) -> None:
     assert "Waiting for fresh data from Plex Media Server" in workbench.text
     assert "Blocked · source data stale" in detail.text
     assert "Waiting for fresh data from Plex Media Server" in detail.text
+
+
+def test_media_detail_separates_current_files_from_previous_revisions(client, app) -> None:
+    authenticate(client)
+    with app.state.database.session_factory() as session:
+        radarr = IntegrationInstance(
+            kind="RADARR",
+            name="Radarr-1080P",
+            base_url="http://radarr:7878",
+            enabled=True,
+            management_mode="MANAGED",
+            credentials_encrypted=app.state.credential_cipher.encrypt({"api_key": "secret"}),
+        )
+        identity = MediaIdentity(
+            media_type="MOVIE",
+            source_key="tmdb:51052",
+            canonical_title="Arthur Christmas",
+            tmdb_id=51052,
+            year=2011,
+        )
+        session.add_all([radarr, identity])
+        session.flush()
+        lifecycle = MediaLifecycle(
+            identity_id=identity.id,
+            integration_id=radarr.id,
+            arr_item_id=42,
+            state="ACTIVE",
+            protection_state="UNPROTECTED",
+            protection_sources=[],
+            current_path="/movies/Arthur Christmas/current-remux.mkv",
+            first_imported_at=datetime(2022, 11, 24, tzinfo=UTC),
+        )
+        session.add(lifecycle)
+        session.flush()
+        session.add_all(
+            [
+                MediaFileRevision(
+                    lifecycle_id=lifecycle.id,
+                    arr_file_id=1,
+                    path="/movies/Arthur Christmas/previous-release.mp4",
+                    imported_at=datetime(2022, 11, 24, tzinfo=UTC),
+                    quality="Bluray-1080p",
+                    active=False,
+                ),
+                MediaFileRevision(
+                    lifecycle_id=lifecycle.id,
+                    arr_file_id=2,
+                    path="/movies/Arthur Christmas/current-remux.mkv",
+                    imported_at=datetime(2026, 8, 18, tzinfo=UTC),
+                    quality="Remux-1080p",
+                    active=True,
+                ),
+            ]
+        )
+        session.commit()
+        lifecycle_id = lifecycle.id
+
+    detail = client.get(f"/media/{lifecycle_id}")
+
+    assert detail.status_code == 200
+    assert "Current file" in detail.text
+    assert "Current in Radarr-1080P" in detail.text
+    assert "1 previous revision" in detail.text
+    assert "Previously observed; not currently reported by Radarr-1080P" in detail.text
+    assert detail.text.index("current-remux.mkv") < detail.text.index("previous-release.mp4")
+    assert '<details class="revision-history">' in detail.text
+    assert "Files and revisions" not in detail.text
 
 
 def test_recompute_clears_a_watch_that_predates_import(app) -> None:
@@ -964,6 +1186,67 @@ def test_media_workbench_groups_tv_and_filters_large_inventory(client, app) -> N
     never_watched = client.get("/media?watch_state=NEVER_WATCHED")
     assert "Season 1" in never_watched.text
     assert "Season 2" not in never_watched.text
+
+
+def test_series_summary_names_specials_and_ignores_missing_season_deadlines(client, app) -> None:
+    authenticate(client)
+    with app.state.database.session_factory() as session:
+        sonarr = IntegrationInstance(
+            kind="SONARR",
+            name="Sonarr-1080P",
+            base_url="http://sonarr:8989",
+            enabled=True,
+            management_mode="MANAGED",
+            credentials_encrypted=app.state.credential_cipher.encrypt({"api_key": "secret"}),
+        )
+        session.add(sonarr)
+        session.flush()
+        identities = [
+            MediaIdentity(
+                media_type="SEASON",
+                source_key=f"tvdb:100:season:{season}",
+                canonical_title=f"Below Deck Sailing Yacht · Season {season}",
+                series_tvdb_id=100,
+                season_number=season,
+                year=2020,
+            )
+            for season in (0, 5)
+        ]
+        session.add_all(identities)
+        session.flush()
+        session.add_all(
+            [
+                MediaLifecycle(
+                    identity_id=identities[0].id,
+                    integration_id=sonarr.id,
+                    arr_item_id=10,
+                    state="MISSING",
+                    protection_state="UNPROTECTED",
+                    protection_sources=[],
+                    retention_deadline=datetime(2020, 9, 8, 12, tzinfo=UTC),
+                ),
+                MediaLifecycle(
+                    identity_id=identities[1].id,
+                    integration_id=sonarr.id,
+                    arr_item_id=10,
+                    state="ACTIVE",
+                    protection_state="UNPROTECTED",
+                    protection_sources=[],
+                    first_imported_at=datetime(2024, 10, 8, 12, tzinfo=UTC),
+                    retention_deadline=datetime(2025, 3, 26, 12, tzinfo=UTC),
+                ),
+            ]
+        )
+        session.commit()
+
+    page = client.get("/media?search=Below+Deck+Sailing+Yacht")
+
+    assert page.status_code == 200
+    assert "Below Deck Sailing Yacht · Specials" in page.text
+    assert "Season 0" not in page.text
+    assert "1 season + specials" in page.text
+    assert "2025-03-26" in page.text
+    assert "2020-09-08" not in page.text
 
 
 def test_media_manual_protection_is_selective_reversible_and_visible(client, app) -> None:

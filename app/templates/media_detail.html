@@ -1,12 +1,14 @@
 {% extends "base.html" %}
-{% block title %}{{ identity.canonical_title }} · {{ app_name }}{% endblock %}
+{% set is_specials = identity.media_type == "SEASON" and identity.season_number == 0 %}
+{% set display_title = identity.canonical_title|replace(' · Season 0', ' · Specials') if is_specials else identity.canonical_title %}
+{% block title %}{{ display_title }} · {{ app_name }}{% endblock %}
 {% block body %}
 <div class="app-shell">
   {% set active_page = "media" %}{% include "_sidebar.html" %}
   <main class="workspace media-detail-workspace">
     <a class="back-link" href="/media">Back to lifecycle workbench</a>
     <header class="case-header">
-      <div class="case-title"><span class="media-spine media-spine-{{ identity.media_type|lower }}" aria-hidden="true">{{ 'M' if identity.media_type == 'MOVIE' else 'S' ~ (identity.season_number or 0) }}</span><div><h1>{{ identity.canonical_title }}</h1><p>{{ integration.name }} · {{ identity.media_type|title }}{% if identity.year %} · {{ identity.year }}{% endif %}</p></div></div>
+      <div class="case-title"><span class="media-spine media-spine-{{ identity.media_type|lower }}" aria-hidden="true">{% if identity.media_type == 'MOVIE' %}M{% elif is_specials %}SP{% else %}S{{ identity.season_number or 0 }}{% endif %}</span><div><h1>{{ display_title }}</h1><p>{{ integration.name }} · {{ 'Specials' if is_specials else identity.media_type|title }}{% if identity.year %} · {{ identity.year }}{% endif %}</p></div></div>
       <div class="case-verdict">{% if lifecycle.state == "MISSING" %}<span class="decision-label decision-not-in-library">Not in library</span><p>No downloaded files are present. This item is excluded from retention and legacy bootstrap.</p>{% else %}<span class="decision-label decision-{{ lifecycle.decision|lower }}">{% if lifecycle.decision == "BLOCKED_STALE" %}Blocked · source data stale{% elif lifecycle.decision == "BLOCKED_UNKNOWN" %}Blocked · missing evidence{% else %}{{ lifecycle.decision|replace('_', ' ')|title }}{% endif %}</span><p>{{ lifecycle.decision_reason }}</p>{% endif %}</div>
     </header>
 
@@ -18,8 +20,18 @@
     </section>
 
     <div class="case-columns">
-      <section class="evidence-section"><div class="section-heading"><h2>Files and revisions</h2><p>{{ files|length }} observed</p></div>
-        <div class="evidence-list">{% for file in files %}<div><strong>{{ file.path or 'Path unavailable' }}</strong><span>{% if file.imported_at %}Imported {{ format_date(file.imported_at) }}{% else %}Import time unavailable{% endif %} · {{ file.quality or 'Quality unavailable' }} · {{ ((file.size or 0) / 1073741824)|round(2) }} GiB</span></div>{% else %}<p class="empty-inline">{% if lifecycle.state == "MISSING" %}No files are downloaded for this item.{% else %}The Arr source returned no file revisions; eligibility remains blocked.{% endif %}</p>{% endfor %}</div>
+      {% set current_files = files|selectattr('active')|list %}
+      {% set previous_files = files|rejectattr('active')|list %}
+      <section class="evidence-section file-evidence"><div class="section-heading"><h2>Files</h2><p>{{ current_files|length }} current</p></div>
+        <h3 class="file-group-title">Current {{ 'file' if current_files|length == 1 else 'files' }}</h3>
+        <div class="evidence-list current-file-list">
+          {% for file in current_files %}<div><strong>{{ file.path or 'Path unavailable' }}</strong><span><em class="file-state-current">Current in {{ integration.name }}</em> · {% if file.imported_at %}Imported {{ format_date(file.imported_at) }}{% else %}Import time unavailable{% endif %} · {{ file.quality or 'Quality unavailable' }} · {{ ((file.size or 0) / 1073741824)|round(2) }} GiB</span></div>{% else %}<p class="empty-inline">{% if lifecycle.state == "MISSING" %}No files are downloaded for this item.{% else %}The Arr source returned no current files; eligibility remains blocked.{% endif %}</p>{% endfor %}
+        </div>
+        {% if previous_files %}<details class="revision-history">
+          <summary>{{ previous_files|length }} previous {{ 'revision' if previous_files|length == 1 else 'revisions' }}</summary>
+          <p>Kept as audit history. These files are not considered part of the current library.</p>
+          <div class="evidence-list">{% for file in previous_files %}<div><strong>{{ file.path or 'Path unavailable' }}</strong><span>Previously observed; not currently reported by {{ integration.name }} · {% if file.imported_at %}Imported {{ format_date(file.imported_at) }}{% else %}Import time unavailable{% endif %} · {{ file.quality or 'Quality unavailable' }} · {{ ((file.size or 0) / 1073741824)|round(2) }} GiB</span></div>{% endfor %}</div>
+        </details>{% endif %}
       </section>
       <section class="evidence-section"><div class="section-heading"><h2>Torrent mapping</h2><p>{{ mapped|length }} matched</p></div>
         <div class="evidence-list">{% for mapping, torrent in mapped %}<div><strong>{{ torrent.name }}</strong><span>{{ mapping.mapping_source|replace('_', ' ')|title }} · {{ mapping.confidence|title }} confidence · {{ torrent.state or 'state unknown' }} · ratio {{ torrent.ratio|round(2) if torrent.ratio is not none else 'unknown' }}</span><small>{% for tracker in trackers_by_torrent.get(torrent.id, []) %}{{ tracker.host }} · status {{ tracker.status if tracker.status is not none else 'unknown' }}{% if tracker.message %} · {{ tracker.message }}{% endif %}{% if not loop.last %}<br>{% endif %}{% else %}No tracker metadata{% endfor %}</small></div>{% else %}<p class="empty-inline">No exact download ID or high-confidence content-path match.</p>{% endfor %}</div>
