@@ -17,8 +17,11 @@
 
     <section class="settings-section tracker-policy-section" aria-labelledby="tracker-policy-title">
       <div class="section-heading tracker-heading">
-        <div><h2 id="tracker-policy-title">Tracker rules</h2><p>Set the seeding obligation for each tracker observed in qBittorrent. Every tracker attached to a torrent must pass.</p></div>
-        <span class="safety-lock">Unconfigured trackers block cleanup</span>
+        <div><h2 id="tracker-policy-title">Tracker rules</h2><p>Set seeding obligations for the trackers you use. Every tracker attached to a torrent must pass.</p></div>
+        <div class="tracker-heading-actions">
+          <span class="safety-lock">Unselected trackers block cleanup</span>
+          <button class="button button-secondary" type="button" data-tracker-dialog-open {% if not available_tracker_domains %}disabled aria-describedby="tracker-picker-unavailable"{% endif %}>Add trackers</button>
+        </div>
       </div>
       {% if tracker_domains %}
       <div class="tracker-policy-list">
@@ -52,8 +55,43 @@
         </article>
         {% endfor %}
       </div>
+      {% elif available_tracker_domains %}
+      <div class="empty-state"><h3>No trackers selected</h3><p>Choose Add trackers to select only the domains whose rules you want shown here.</p></div>
       {% else %}
-      <div class="empty-state"><h3>No tracker domains observed</h3><p>Sync an enabled qBittorrent connection after it contains torrents. Tracker rules will appear here automatically.</p></div>
+      <div class="empty-state"><h3>No tracker domains observed</h3><p id="tracker-picker-unavailable">Sync an enabled qBittorrent connection after it contains torrents. You can then choose which tracker rules to show.</p></div>
+      {% endif %}
+
+      {% if available_tracker_domains %}
+      <dialog class="tracker-picker" data-tracker-dialog aria-labelledby="tracker-picker-title">
+        <form method="post" action="/settings/tracker-selection" class="tracker-picker-form">
+          <input type="hidden" name="csrf" value="{{ csrf_token }}">
+          <header class="tracker-picker-header">
+            <div><h3 id="tracker-picker-title">Choose trackers</h3><p>Select the trackers whose rules you want to manage on this page.</p></div>
+            <button class="button button-quiet tracker-picker-close" type="button" data-tracker-dialog-close>Close</button>
+          </header>
+          <div class="tracker-picker-tools">
+            <label for="tracker-search">Find a tracker<input id="tracker-search" type="search" autocomplete="off" placeholder="Search domains" data-tracker-search></label>
+            <div class="tracker-picker-selection-actions">
+              <button class="button button-secondary" type="button" data-tracker-select-visible>Select shown</button>
+              <button class="button button-quiet" type="button" data-tracker-clear>Clear</button>
+            </div>
+            <p data-tracker-search-status aria-live="polite">{{ available_tracker_domains|length }} trackers shown</p>
+          </div>
+          <fieldset class="tracker-picker-list">
+            <legend class="visually-hidden">Discovered tracker domains</legend>
+            {% for tracker in available_tracker_domains %}
+            <label class="tracker-picker-option" data-tracker-option data-domain="{{ tracker.domain|lower }}">
+              <input type="checkbox" name="domains" value="{{ tracker.domain }}" {% if tracker.selected %}checked{% endif %}>
+              <span><strong>{{ tracker.domain }}</strong><small>{{ tracker.torrent_count }} active torrent{% if tracker.torrent_count != 1 %}s{% endif %}</small></span>
+            </label>
+            {% endfor %}
+          </fieldset>
+          <footer class="tracker-picker-footer">
+            <p>Unselected trackers remain blocked in deletion previews.</p>
+            <div><button class="button button-quiet" type="button" data-tracker-dialog-close>Cancel</button><button class="button button-primary" type="submit">Save tracker selection</button></div>
+          </footer>
+        </form>
+      </dialog>
       {% endif %}
     </section>
 

@@ -349,6 +349,7 @@ class TrackerPolicy(Base):
     automatic_deletion_allowed: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False
     )
+    selected: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now
     )

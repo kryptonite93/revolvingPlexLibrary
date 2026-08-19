@@ -196,11 +196,24 @@ def test_tracker_policy_settings_are_discovered_saved_and_re_evaluated(client, a
     page = client.get("/settings")
     assert "Tracker rules" in page.text
     assert "private.example" in page.text
-    assert "Not configured" in page.text
+    assert "No trackers selected" in page.text
+    assert 'name="domain" value="private.example"' not in page.text
+    selection = client.post(
+        "/settings/tracker-selection",
+        data={
+            "csrf": csrf_from(page),
+            "domains": "private.example",
+        },
+        follow_redirects=True,
+    )
+
+    assert selection.status_code == 200
+    assert "Tracker selection saved. 1 rule shown." in selection.text
+    assert 'name="domain" value="private.example"' in selection.text
     response = client.post(
         "/settings/tracker-policy",
         data={
-            "csrf": csrf_from(page),
+            "csrf": csrf_from(selection),
             "domain": "private.example",
             "combination": "RATIO_OR_TIME",
             "minimum_ratio": "1.0",
@@ -222,5 +235,52 @@ def test_tracker_policy_settings_are_discovered_saved_and_re_evaluated(client, a
             )
         )
         assert policy is not None
+        assert policy.selected is True
         assert policy.minimum_seed_seconds == 10 * 86_400
         assert policy.automatic_deletion_allowed is True
+
+
+def test_unselected_tracker_rule_is_hidden_and_blocks_dry_run(client, app) -> None:
+    authenticate(client)
+    with app.state.database.session_factory() as session:
+        lifecycle = add_candidate(session, tracker_domain="private.example")
+        lifecycle_id = lifecycle.id
+        session.add(
+            TrackerPolicy(
+                normalized_domain="private.example",
+                minimum_ratio=1.0,
+                minimum_seed_seconds=10 * 86_400,
+                combination="RATIO_AND_TIME",
+                grace_period_seconds=12 * 3_600,
+                automatic_deletion_allowed=True,
+                selected=True,
+            )
+        )
+        evaluate_dry_run(session)
+        session.commit()
+
+    page = client.get("/settings")
+    assert 'name="domain" value="private.example"' in page.text
+    response = client.post(
+        "/settings/tracker-selection",
+        data={"csrf": csrf_from(page)},
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert "Tracker selection saved. 0 rules shown." in response.text
+    assert 'name="domain" value="private.example"' not in response.text
+    assert "No trackers selected" in response.text
+    with app.state.database.session_factory() as session:
+        policy = session.scalar(
+            select(TrackerPolicy).where(
+                TrackerPolicy.normalized_domain == "private.example"
+            )
+        )
+        proposal = session.scalar(
+            select(DryRunProposal).where(DryRunProposal.lifecycle_id == lifecycle_id)
+        )
+        assert policy is not None
+        assert policy.selected is False
+        assert proposal is not None
+        assert proposal.reason_code == "TRACKER_POLICY_MISSING"

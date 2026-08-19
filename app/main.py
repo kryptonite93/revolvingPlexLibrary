@@ -164,14 +164,16 @@ def _integration_context(session: Session, sync_activity=None) -> dict:
         for policy in session.scalars(select(TrackerPolicy)).all()
     }
     discovered_domains = dict(discovered_tracker_domains(session))
-    tracker_domains = [
+    available_tracker_domains = [
         {
             "domain": domain,
             "torrent_count": discovered_domains.get(domain, 0),
             "policy": tracker_policies.get(domain),
+            "selected": bool(tracker_policies.get(domain) and tracker_policies[domain].selected),
         }
         for domain in sorted(set(discovered_domains) | set(tracker_policies))
     ]
+    tracker_domains = [tracker for tracker in available_tracker_domains if tracker["selected"]]
     dry_run_counts = {
         state: int(count)
         for state, count in session.execute(
@@ -206,6 +208,7 @@ def _integration_context(session: Session, sync_activity=None) -> dict:
         "source_is_fresh": source_is_fresh,
         "policy": get_inventory_policy(session),
         "tracker_domains": tracker_domains,
+        "available_tracker_domains": available_tracker_domains,
         "dry_run_counts": dry_run_counts,
         "dry_run_evaluated_at": dry_run_evaluated_at,
         "dry_run_rows": dry_run_rows,
@@ -1442,6 +1445,61 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 f"Tracker policy for {normalized_domain} saved. "
                 f"Dry run re-evaluated {summary.evaluated} downloaded items."
             )
+        )
+
+    @app.post("/settings/tracker-selection")
+    def settings_tracker_selection_update(
+        request: Request,
+        domains: list[str] | None = Form(None),
+        csrf: str = Form(),
+        session: Session = Depends(_session),
+    ):
+        verify_csrf(request, csrf)
+        admin = _require_admin(request, session)
+        policies = {
+            policy.normalized_domain: policy
+            for policy in session.scalars(select(TrackerPolicy)).all()
+        }
+        known_domains = {domain for domain, _ in discovered_tracker_domains(session)} | set(
+            policies
+        )
+        selected_domains = {
+            normalize_tracker_domain(domain) for domain in (domains or [])
+        }
+        if "" in selected_domains or not selected_domains.issubset(known_domains):
+            return _integrations_redirect(
+                error="Choose only trackers discovered by qBittorrent."
+            )
+        for domain, policy in policies.items():
+            policy.selected = domain in selected_domains
+        for domain in selected_domains - set(policies):
+            policies[domain] = save_tracker_policy(
+                session,
+                domain=domain,
+                minimum_ratio=1.0,
+                minimum_seed_seconds=10 * 86_400,
+                combination="RATIO_OR_TIME",
+                grace_period_seconds=12 * 3_600,
+                automatic_deletion_allowed=False,
+            )
+        session.flush()
+        summary = evaluate_dry_run(session)
+        append_event(
+            session,
+            event_type="tracker.selection_changed",
+            entity_type="tracker_policy",
+            entity_id="selection",
+            actor_type="admin",
+            actor_id=admin.id,
+            payload={
+                "selected_domains": sorted(selected_domains),
+                "dry_run_evaluated": summary.evaluated,
+            },
+        )
+        session.commit()
+        count = len(selected_domains)
+        return _integrations_redirect(
+            message=f"Tracker selection saved. {count} rule{'s' if count != 1 else ''} shown."
         )
 
     @app.post("/settings/dry-run")

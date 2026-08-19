@@ -96,6 +96,7 @@ def save_tracker_policy(
     if policy is None:
         policy = TrackerPolicy(normalized_domain=normalized, combination=combination)
         session.add(policy)
+    policy.selected = True
     policy.minimum_ratio = (
         minimum_ratio
         if combination in {"RATIO_ONLY", "RATIO_OR_TIME", "RATIO_AND_TIME"}
@@ -238,7 +239,10 @@ def evaluate_dry_run(session: Session) -> DryRunSummary:
     for tracker in session.scalars(select(TorrentTracker)).all():
         trackers_by_torrent.setdefault(tracker.torrent_id, []).append(tracker)
     policies = {
-        policy.normalized_domain: policy for policy in session.scalars(select(TrackerPolicy)).all()
+        policy.normalized_domain: policy
+        for policy in session.scalars(
+            select(TrackerPolicy).where(TrackerPolicy.selected.is_(True))
+        ).all()
     }
     proposals = {
         proposal.lifecycle_id: proposal

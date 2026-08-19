@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import create_engine, inspect, text
 
 
 def test_migrations_apply_to_empty_database(tmp_path, monkeypatch) -> None:
@@ -38,3 +38,41 @@ def test_migrations_apply_to_empty_database(tmp_path, monkeypatch) -> None:
     assert "seeding_seconds" in {
         column["name"] for column in inspector.get_columns("torrent")
     }
+    assert "selected" in {
+        column["name"] for column in inspector.get_columns("tracker_policy")
+    }
+
+
+def test_tracker_selection_migration_preserves_existing_rules(tmp_path, monkeypatch) -> None:
+    database_path = tmp_path / "existing-rules.db"
+    database_url = f"sqlite+pysqlite:///{database_path.as_posix()}"
+    monkeypatch.setenv("CONFIG_DIRECTORY", str(tmp_path))
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    config = Config("alembic.ini")
+    command.upgrade(config, "0007_tracker_dry_run")
+    engine = create_engine(database_url)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """INSERT INTO tracker_policy (
+                    id, normalized_domain, minimum_ratio, minimum_seed_seconds,
+                    combination, grace_period_seconds, automatic_deletion_allowed,
+                    created_at, updated_at
+                ) VALUES (
+                    'policy-1', 'tracker.example', 1.0, 864000,
+                    'RATIO_OR_TIME', 43200, 0,
+                    '2026-08-19 00:00:00', '2026-08-19 00:00:00'
+                )"""
+            )
+        )
+
+    command.upgrade(config, "head")
+
+    with engine.connect() as connection:
+        selected = connection.scalar(
+            text(
+                "SELECT selected FROM tracker_policy "
+                "WHERE normalized_domain = 'tracker.example'"
+            )
+        )
+    assert selected == 1

@@ -230,7 +230,7 @@ The add-service panel remains a single sticky form on wide screens and moves bef
 
 ### Tracker Rules
 
-Tracker rules lead the Settings safety story. Each qBittorrent tracker domain appears as a divider-led record with its observed torrent count, written policy state, ratio and seed-time requirements, grace period, and a tracker-scoped future-automation gate. Unconfigured domains state that they block cleanup. Requirement choices disable fields that do not participate in the selected rule, and Never remove suppresses every cleanup-permission input while explaining why.
+Tracker rules lead the Settings safety story, but discovered domains do not expand into configuration records automatically. Add trackers opens a focused, searchable selection dialog with Select shown and Clear actions; only selected domains appear in the main Settings flow. Each selected qBittorrent tracker appears as a divider-led record with its observed torrent count, written policy state, ratio and seed-time requirements, grace period, and a tracker-scoped future-automation gate. Unselected domains remain fail-closed and block cleanup. Requirement choices disable fields that do not participate in the selected rule, and Never remove suppresses every cleanup-permission input while explaining why.
 
 ### Read-only Deletion Preview
 

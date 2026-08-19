@@ -34,3 +34,53 @@ forms.forEach((form) => {
   requirement.addEventListener("change", () => updatePolicyFields(form));
   updatePolicyFields(form);
 });
+
+const trackerDialog = document.querySelector("[data-tracker-dialog]");
+
+if (trackerDialog) {
+  const openButton = document.querySelector("[data-tracker-dialog-open]");
+  const closeButtons = trackerDialog.querySelectorAll("[data-tracker-dialog-close]");
+  const searchInput = trackerDialog.querySelector("[data-tracker-search]");
+  const options = [...trackerDialog.querySelectorAll("[data-tracker-option]")];
+  const status = trackerDialog.querySelector("[data-tracker-search-status]");
+
+  function updateTrackerStatus() {
+    const shown = options.filter((option) => !option.hidden).length;
+    const selected = options.filter((option) => option.querySelector("input").checked).length;
+    status.textContent = `${selected} selected · ${shown} shown`;
+  }
+
+  function filterTrackers() {
+    const query = searchInput.value.trim().toLowerCase();
+    options.forEach((option) => {
+      option.hidden = !option.dataset.domain.includes(query);
+    });
+    updateTrackerStatus();
+  }
+
+  openButton.addEventListener("click", () => {
+    trackerDialog.showModal();
+    searchInput.focus();
+    updateTrackerStatus();
+  });
+  closeButtons.forEach((button) => {
+    button.addEventListener("click", () => trackerDialog.close());
+  });
+  trackerDialog.addEventListener("click", (event) => {
+    if (event.target === trackerDialog) trackerDialog.close();
+  });
+  searchInput.addEventListener("input", filterTrackers);
+  trackerDialog.addEventListener("change", updateTrackerStatus);
+  trackerDialog.querySelector("[data-tracker-select-visible]").addEventListener("click", () => {
+    options.filter((option) => !option.hidden).forEach((option) => {
+      option.querySelector("input").checked = true;
+    });
+    updateTrackerStatus();
+  });
+  trackerDialog.querySelector("[data-tracker-clear]").addEventListener("click", () => {
+    options.forEach((option) => {
+      option.querySelector("input").checked = false;
+    });
+    updateTrackerStatus();
+  });
+}
