@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added per-tracker ratio/seed-time policies and a persisted, fail-closed read-only deletion preview.
 - Preserved each season's actual meaningful-watch date while applying forward TV retention resets separately.
 - Labeled Sonarr season zero as Specials and excluded missing seasons from series retention summaries.
 - Separated current Arr files from clearly labeled, collapsed historical revisions on media detail pages.

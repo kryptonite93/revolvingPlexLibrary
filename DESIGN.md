@@ -228,6 +228,16 @@ Each service row combines a 2:3 media tile, identity and URL, stacked text state
 
 The add-service panel remains a single sticky form on wide screens and moves before the service list on narrower layouts. New services are presented as disabled by default, credential handling is explained before entry, and empty or unavailable operations teach the next safe step.
 
+### Tracker Rules
+
+Tracker rules lead the Settings safety story. Each qBittorrent tracker domain appears as a divider-led record with its observed torrent count, written policy state, ratio and seed-time requirements, grace period, and a tracker-scoped future-automation gate. Unconfigured domains state that they block cleanup. Requirement choices disable fields that do not participate in the selected rule, and Never remove suppresses every cleanup-permission input while explaining why.
+
+### Read-only Deletion Preview
+
+The preview follows tracker rules and evaluates stored evidence without contacting an integration. A compact four-part summary separates eligible-in-simulation, blocked, retained, and protected results; each result then names its reason and carries a persistent View evidence cue into the lifecycle case file. Inventory Only remains visible in the page header and in the preview timestamp line, so an eligible simulation is never presented as executable.
+
+Shared torrents, including a future multi-season pack, fail closed when one torrent maps to more than one movie or season. The preview must name that shared mapping and block automatic cleanup until a dedicated mapping workflow is implemented and tested.
+
 ## Do's and Don'ts
 
 ### Do:

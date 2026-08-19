@@ -294,6 +294,7 @@ class Torrent(Base):
     size: Mapped[int | None] = mapped_column(BigInteger)
     amount_left: Mapped[int | None] = mapped_column(BigInteger)
     ratio: Mapped[float | None] = mapped_column(Float)
+    seeding_seconds: Mapped[int | None] = mapped_column(BigInteger)
     added_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_activity_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -333,6 +334,44 @@ class TorrentMediaMapping(Base):
     confidence: Mapped[str] = mapped_column(String(20), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now
+    )
+
+
+class TrackerPolicy(Base):
+    __tablename__ = "tracker_policy"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    normalized_domain: Mapped[str] = mapped_column(String(240), unique=True, nullable=False)
+    minimum_ratio: Mapped[float | None] = mapped_column(Float)
+    minimum_seed_seconds: Mapped[int | None] = mapped_column(BigInteger)
+    combination: Mapped[str] = mapped_column(String(24), nullable=False)
+    grace_period_seconds: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    automatic_deletion_allowed: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
+    )
+
+
+class DryRunProposal(Base):
+    __tablename__ = "dry_run_proposal"
+    __table_args__ = (UniqueConstraint("lifecycle_id", name="uq_dry_run_lifecycle"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    lifecycle_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("media_lifecycle.id"), nullable=False, index=True
+    )
+    state: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    reason_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    reason_text: Mapped[str] = mapped_column(Text, nullable=False)
+    estimated_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    eligibility_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    evaluated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, index=True
     )
 
 

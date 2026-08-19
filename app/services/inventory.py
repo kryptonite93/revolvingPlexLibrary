@@ -930,6 +930,7 @@ def sync_qbittorrent(
         torrent.size = row.get("size")
         torrent.amount_left = row.get("amount_left")
         torrent.ratio = row.get("ratio")
+        torrent.seeding_seconds = row.get("seeding_time")
         torrent.added_at = parse_datetime(row.get("added_on"))
         torrent.completed_at = parse_datetime(row.get("completion_on"))
         torrent.last_activity_at = parse_datetime(row.get("last_activity"))

@@ -30,6 +30,11 @@ def test_migrations_apply_to_empty_database(tmp_path, monkeypatch) -> None:
         "torrent_media_mapping",
         "request_record",
         "requester_profile",
+        "tracker_policy",
+        "dry_run_proposal",
         "alembic_version",
     }.issubset(inspector.get_table_names())
     assert "monitored" in {column["name"] for column in inspector.get_columns("media_lifecycle")}
+    assert "seeding_seconds" in {
+        column["name"] for column in inspector.get_columns("torrent")
+    }

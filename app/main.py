@@ -12,13 +12,14 @@ from fastapi import Depends, FastAPI, Form, HTTPException, Query, Request, statu
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.persistence.database import Database
 from app.persistence.models import (
     AdminUser,
+    DryRunProposal,
     EventRecord,
     IntegrationInstance,
     ManagedLibrary,
@@ -32,6 +33,7 @@ from app.persistence.models import (
     Torrent,
     TorrentMediaMapping,
     TorrentTracker,
+    TrackerPolicy,
 )
 from app.presentation import format_local_date, format_local_datetime
 from app.security.auth import (
@@ -42,6 +44,12 @@ from app.security.auth import (
     verify_password,
 )
 from app.security.credentials import CredentialCipher
+from app.services.dry_run import (
+    discovered_tracker_domains,
+    evaluate_dry_run,
+    normalize_tracker_domain,
+    save_tracker_policy,
+)
 from app.services.events import append_event
 from app.services.integrations import (
     change_management_mode,
@@ -151,6 +159,44 @@ def _integration_context(session: Session, sync_activity=None) -> dict:
     ).all()
     for profile in requesters:
         requesters_by_integration.setdefault(profile.integration_id, []).append(profile)
+    tracker_policies = {
+        policy.normalized_domain: policy
+        for policy in session.scalars(select(TrackerPolicy)).all()
+    }
+    discovered_domains = dict(discovered_tracker_domains(session))
+    tracker_domains = [
+        {
+            "domain": domain,
+            "torrent_count": discovered_domains.get(domain, 0),
+            "policy": tracker_policies.get(domain),
+        }
+        for domain in sorted(set(discovered_domains) | set(tracker_policies))
+    ]
+    dry_run_counts = {
+        state: int(count)
+        for state, count in session.execute(
+            select(DryRunProposal.state, func.count())
+            .group_by(DryRunProposal.state)
+        )
+    }
+    dry_run_evaluated_at = session.scalar(select(func.max(DryRunProposal.evaluated_at)))
+    dry_run_rows = session.execute(
+        select(DryRunProposal, MediaLifecycle, MediaIdentity, IntegrationInstance)
+        .join(MediaLifecycle, MediaLifecycle.id == DryRunProposal.lifecycle_id)
+        .join(MediaIdentity, MediaIdentity.id == MediaLifecycle.identity_id)
+        .join(IntegrationInstance, IntegrationInstance.id == MediaLifecycle.integration_id)
+        .order_by(
+            case(
+                (DryRunProposal.state == "ELIGIBLE", 0),
+                (DryRunProposal.state == "BLOCKED", 1),
+                (DryRunProposal.state == "RETAINED", 2),
+                else_=3,
+            ),
+            MediaIdentity.canonical_title,
+            MediaIdentity.season_number,
+        )
+        .limit(30)
+    ).all()
     return {
         "integrations": integrations,
         "libraries_by_plex": libraries_by_plex,
@@ -159,6 +205,10 @@ def _integration_context(session: Session, sync_activity=None) -> dict:
         "sync_activity": sync_activity,
         "source_is_fresh": source_is_fresh,
         "policy": get_inventory_policy(session),
+        "tracker_domains": tracker_domains,
+        "dry_run_counts": dry_run_counts,
+        "dry_run_evaluated_at": dry_run_evaluated_at,
+        "dry_run_rows": dry_run_rows,
     }
 
 
@@ -1316,6 +1366,117 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         session.commit()
         return _integrations_redirect(
             message="Retention settings saved. Existing evidence was re-evaluated fail-closed."
+        )
+
+    @app.post("/settings/tracker-policy")
+    def settings_tracker_policy_update(
+        request: Request,
+        domain: str = Form(),
+        combination: str = Form(),
+        minimum_ratio: str = Form(""),
+        minimum_seed_days: str = Form(""),
+        grace_hours: str = Form("0"),
+        automatic_deletion_allowed: str | None = Form(None),
+        csrf: str = Form(),
+        session: Session = Depends(_session),
+    ):
+        verify_csrf(request, csrf)
+        admin = _require_admin(request, session)
+        normalized_domain = normalize_tracker_domain(domain)
+        known_domains = {item[0] for item in discovered_tracker_domains(session)}
+        existing_policy = session.scalar(
+            select(TrackerPolicy).where(
+                TrackerPolicy.normalized_domain == normalized_domain
+            )
+        )
+        if normalized_domain not in known_domains and existing_policy is None:
+            return _integrations_redirect(error="Choose a tracker discovered by qBittorrent.")
+        try:
+            ratio = float(minimum_ratio) if minimum_ratio.strip() else None
+            seed_days = float(minimum_seed_days) if minimum_seed_days.strip() else None
+            grace = float(grace_hours) if grace_hours.strip() else 0.0
+        except ValueError:
+            return _integrations_redirect(
+                error="Ratio, seed time, and grace period must be valid numbers."
+            )
+        if seed_days is not None and seed_days < 0:
+            return _integrations_redirect(error="Minimum seed time cannot be negative.")
+        if grace < 0:
+            return _integrations_redirect(error="Grace period cannot be negative.")
+        try:
+            tracker_policy = save_tracker_policy(
+                session,
+                domain=normalized_domain,
+                minimum_ratio=ratio,
+                minimum_seed_seconds=(
+                    round(seed_days * 86_400) if seed_days is not None else None
+                ),
+                combination=combination,
+                grace_period_seconds=round(grace * 3600),
+                automatic_deletion_allowed=automatic_deletion_allowed == "yes",
+            )
+            summary = evaluate_dry_run(session)
+        except ValueError as exc:
+            session.rollback()
+            return _integrations_redirect(error=str(exc))
+        append_event(
+            session,
+            event_type="tracker.policy_changed",
+            entity_type="tracker_policy",
+            entity_id=tracker_policy.id,
+            actor_type="admin",
+            actor_id=admin.id,
+            payload={
+                "normalized_domain": normalized_domain,
+                "minimum_ratio": tracker_policy.minimum_ratio,
+                "minimum_seed_seconds": tracker_policy.minimum_seed_seconds,
+                "combination": tracker_policy.combination,
+                "grace_period_seconds": tracker_policy.grace_period_seconds,
+                "automatic_deletion_allowed": tracker_policy.automatic_deletion_allowed,
+                "dry_run_evaluated": summary.evaluated,
+            },
+        )
+        session.commit()
+        return _integrations_redirect(
+            message=(
+                f"Tracker policy for {normalized_domain} saved. "
+                f"Dry run re-evaluated {summary.evaluated} downloaded items."
+            )
+        )
+
+    @app.post("/settings/dry-run")
+    def settings_dry_run(
+        request: Request,
+        csrf: str = Form(),
+        session: Session = Depends(_session),
+    ):
+        verify_csrf(request, csrf)
+        admin = _require_admin(request, session)
+        summary = evaluate_dry_run(session)
+        append_event(
+            session,
+            event_type="dry_run.evaluated",
+            entity_type="dry_run",
+            entity_id=None,
+            actor_type="admin",
+            actor_id=admin.id,
+            payload={
+                "evaluated": summary.evaluated,
+                "eligible": summary.eligible,
+                "blocked": summary.blocked,
+                "retained": summary.retained,
+                "protected": summary.protected,
+                "estimated_bytes": summary.estimated_bytes,
+                "external_mutations": 0,
+            },
+        )
+        session.commit()
+        return _integrations_redirect(
+            message=(
+                f"Dry run evaluated {summary.evaluated} downloaded items: "
+                f"{summary.eligible} eligible and {summary.blocked} blocked. "
+                "No external changes were made."
+            )
         )
 
     @app.get("/media/{lifecycle_id}", response_class=HTMLResponse)
