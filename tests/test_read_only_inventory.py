@@ -830,13 +830,18 @@ def test_failed_sync_immediately_blocks_existing_decisions(app, monkeypatch) -> 
         assert lifecycle.decision_reason == "Waiting for fresh data from MediaMule Requests"
 
 
-def test_media_workbench_and_policy_are_web_configurable(client, app) -> None:
+def test_settings_owns_policy_configuration_and_media_stays_focused(client, app) -> None:
     authenticate(client)
-    page = client.get("/media")
+    page = client.get("/settings")
     assert page.status_code == 200
-    assert "Decision workbench" in page.text
+    assert "Retention and freshness" in page.text
+    assert 'action="/settings/policy"' in page.text
+    media_page = client.get("/media")
+    assert media_page.status_code == 200
+    assert "Decision workbench" in media_page.text
+    assert 'name="meaningful_minutes"' not in media_page.text
     response = client.post(
-        "/media/policy",
+        "/settings/policy",
         data={
             "csrf": csrf_from(page),
             "meaningful_minutes": 12,
@@ -853,7 +858,7 @@ def test_media_workbench_and_policy_are_web_configurable(client, app) -> None:
         follow_redirects=True,
     )
     assert response.status_code == 200
-    assert "Inventory policy saved" in response.text
+    assert "Retention settings saved" in response.text
     assert 'name="meaningful_minutes" min="1" max="1440" value="12"' in response.text
 
 

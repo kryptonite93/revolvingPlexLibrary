@@ -1,11 +1,11 @@
 {% extends "base.html" %}
-{% block title %}Integrations · {{ app_name }}{% endblock %}
+{% block title %}Settings · {{ app_name }}{% endblock %}
 {% block body %}
 <div class="app-shell">
-  {% set active_page = "integrations" %}{% include "_sidebar.html" %}
+  {% set active_page = "settings" %}{% include "_sidebar.html" %}
   <main class="workspace integrations-workspace">
     <header class="page-header">
-      <div><h1>Integrations</h1><p class="header-support">Connect, verify, then deliberately widen access.</p></div>
+      <div><h1>Settings</h1><p class="header-support">Configure connections, retention rules, and evidence freshness.</p></div>
       <span class="status-pill status-neutral"><span aria-hidden="true"></span>INVENTORY ONLY</span>
     </header>
 
@@ -15,7 +15,20 @@
     {% if errors %}<div class="notice notice-error" role="alert"><strong>Check the highlighted field.</strong></div>{% endif %}
     {% if sync_activity %}<div class="notice notice-warning sync-running-notice" role="status"><strong>Sync running: {{ sync_activity.integration_name }}</strong><span>All other inventory syncs will be available after this one finishes.</span></div>{% endif %}
 
-    <section class="integration-layout" aria-label="Integration setup">
+    <section class="settings-section" aria-labelledby="retention-settings-title">
+      <div class="section-heading">
+        <div><h2 id="retention-settings-title">Retention and freshness</h2><p>Define meaningful playback, retention periods, safeguards, and how long source evidence stays current.</p></div>
+      </div>
+      <form method="post" action="/settings/policy" class="policy-form">
+        <input type="hidden" name="csrf" value="{{ csrf_token }}">
+        <fieldset><legend>Meaningful playback</legend><label>Minimum minutes<input type="number" name="meaningful_minutes" min="1" max="1440" value="{{ policy.meaningful_minutes }}" required></label><label>Minimum percent<input type="number" name="meaningful_percent" min="1" max="100" value="{{ policy.meaningful_percent }}" required></label></fieldset>
+        <fieldset><legend>Retention</legend><label>Never watched · weeks<input type="number" name="never_watched_weeks" min="1" max="520" value="{{ policy.never_watched_weeks }}" required></label><label>After meaningful watch · weeks<input type="number" name="watched_weeks" min="1" max="520" value="{{ policy.watched_weeks }}" required></label><label class="wide-field">Protected Arr tag<input name="protected_tag_name" maxlength="120" value="{{ policy.protected_tag_name }}" required></label></fieldset>
+        <fieldset class="freshness-fields"><legend>Freshness windows · minutes</legend><label>Tautulli<input type="number" name="tautulli_fresh_minutes" min="1" value="{{ policy.tautulli_fresh_minutes }}" required></label><label>qBittorrent<input type="number" name="torrent_fresh_minutes" min="1" value="{{ policy.torrent_fresh_minutes }}" required></label><label>Arr<input type="number" name="arr_fresh_minutes" min="1" value="{{ policy.arr_fresh_minutes }}" required></label><label>Overseerr<input type="number" name="overseerr_fresh_minutes" min="1" value="{{ policy.overseerr_fresh_minutes }}" required></label><label>Plex<input type="number" name="plex_fresh_minutes" min="1" value="{{ policy.plex_fresh_minutes }}" required></label></fieldset>
+        <div class="policy-save"><p>Saving recalculates decisions from stored evidence. It does not call any external mutation API.</p><button class="button button-primary" type="submit">Save retention settings</button></div>
+      </form>
+    </section>
+
+    <section class="integration-layout settings-section" aria-label="Connection settings">
       <div class="integration-list">
         <div class="section-heading">
           <div><h2>Connected services</h2><p>Every service begins disabled. Connection tests are always available.</p></div>
@@ -141,8 +154,7 @@
           </select>{% if errors.kind %}<small class="field-error" id="kind-error">{{ errors.kind }}</small>{% endif %}</label>
           <label>Display name<input name="name" value="{{ form.name if form else '' }}" placeholder="Living room Plex" maxlength="120" {% if errors.name %}aria-invalid="true" aria-describedby="name-error"{% endif %} required>{% if errors.name %}<small class="field-error" id="name-error">{{ errors.name }}</small>{% endif %}</label>
           <label>Internal URL<input type="url" name="base_url" value="{{ form.base_url if form else '' }}" placeholder="http://192.168.1.20:32400" aria-describedby="base-url-help{% if errors.base_url %} base-url-error{% endif %}" {% if errors.base_url %}aria-invalid="true"{% endif %} required><small id="base-url-help">Include any configured base path.</small>{% if errors.base_url %}<small class="field-error" id="base-url-error">{{ errors.base_url }}</small>{% endif %}</label>
-          <label>API key or token<input type="password" name="api_key" autocomplete="off" aria-describedby="api-key-help{% if errors.api_key %} api-key-error{% endif %}" {% if errors.api_key %}aria-invalid="true"{% endif %}><small id="api-key-help">Required except for qBittorrent cookie login. qBittorrent API keys require v5.2+.</small>{% if errors.api_key %}<small class="field-error" id="api-key-error">{{ errors.api_key }}</small>{% endif %}</label>
-          <fieldset class="credential-alternative" {% if errors.credentials %}aria-describedby="credentials-error"{% endif %}><legend>qBittorrent cookie login alternative</legend><label>Username<input name="username" value="{{ form.username if form else '' }}" autocomplete="off"></label><label>Password<input type="password" name="password" autocomplete="off"></label>{% if errors.credentials %}<small class="field-error" id="credentials-error">{{ errors.credentials }}</small>{% endif %}</fieldset>
+          <label>API key or token<input type="password" name="api_key" autocomplete="off" aria-describedby="api-key-help{% if errors.api_key %} api-key-error{% endif %}" {% if errors.api_key %}aria-invalid="true"{% endif %} required><small id="api-key-help">Required. qBittorrent requires version 5.2 or newer and an API key generated in its Web UI settings.</small>{% if errors.api_key %}<small class="field-error" id="api-key-error">{{ errors.api_key }}</small>{% endif %}</label>
           <button class="button button-primary" type="submit">Save disabled service</button>
         </form>
       </aside>

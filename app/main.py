@@ -158,6 +158,7 @@ def _integration_context(session: Session, sync_activity=None) -> dict:
         "requesters_by_integration": requesters_by_integration,
         "sync_activity": sync_activity,
         "source_is_fresh": source_is_fresh,
+        "policy": get_inventory_policy(session),
     }
 
 
@@ -169,16 +170,16 @@ def _integrations_redirect(
 ):
     if error:
         return RedirectResponse(
-            f"/integrations?error={quote_plus(error)}",
+            f"/settings?error={quote_plus(error)}",
             status_code=status.HTTP_303_SEE_OTHER,
         )
     if warning:
         return RedirectResponse(
-            f"/integrations?warning={quote_plus(warning)}",
+            f"/settings?warning={quote_plus(warning)}",
             status_code=status.HTTP_303_SEE_OTHER,
         )
     return RedirectResponse(
-        f"/integrations?message={quote_plus(message or '')}",
+        f"/settings?message={quote_plus(message or '')}",
         status_code=status.HTTP_303_SEE_OTHER,
     )
 
@@ -468,7 +469,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     @app.get("/integrations", response_class=HTMLResponse)
-    def integrations_page(
+    @app.get("/settings", response_class=HTMLResponse)
+    def settings_page(
         request: Request,
         message: str | None = None,
         error: str | None = None,
@@ -493,8 +495,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         name: str = Form(),
         base_url: str = Form(),
         api_key: str = Form(""),
-        username: str = Form(""),
-        password: str = Form(""),
         csrf: str = Form(),
         session: Session = Depends(_session),
     ):
@@ -508,8 +508,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 name=name,
                 base_url=base_url,
                 api_key=api_key,
-                username=username,
-                password=password,
             )
         except ValueError as validation_error:
             validation_message = str(validation_error)
@@ -520,8 +518,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 field = "name"
             elif "API key" in validation_message or "token" in validation_message:
                 field = "api_key"
-            elif "username" in validation_message or "password" in validation_message:
-                field = "credentials"
             context = _integration_context(session)
             context.update(
                 {
@@ -531,7 +527,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         "kind": kind,
                         "name": name,
                         "base_url": base_url,
-                        "username": username,
                     },
                 }
             )
@@ -602,7 +597,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "form": {
                     "name": integration.name,
                     "base_url": integration.base_url,
-                    "username": "",
                 },
                 "delete_error": None,
             },
@@ -615,8 +609,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         name: str = Form(),
         base_url: str = Form(),
         api_key: str = Form(""),
-        username: str = Form(""),
-        password: str = Form(""),
         csrf: str = Form(),
         session: Session = Depends(_session),
     ):
@@ -633,12 +625,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 name=name,
                 base_url=base_url,
                 api_key=api_key,
-                username=username,
-                password=password,
             )
         except ValueError as validation_error:
             validation_message = str(validation_error)
-            field = "credentials"
+            field = "api_key"
             if "URL" in validation_message or "url" in validation_message:
                 field = "base_url"
             elif "Name" in validation_message:
@@ -653,7 +643,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "form": {
                         "name": name,
                         "base_url": base_url,
-                        "username": username,
                     },
                     "delete_error": None,
                 },
@@ -1099,7 +1088,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             select(SourceFreshness).order_by(SourceFreshness.source_kind)
         ).all()
         fresh_count = sum(source_is_fresh(item) for item in freshness)
-        policy = get_inventory_policy(session)
         return _render(
             request,
             "media.html",
@@ -1138,7 +1126,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "message": message,
                 "error": error,
                 "source_is_fresh": source_is_fresh,
-                "policy": policy,
             },
         )
 
@@ -1260,7 +1247,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return _media_redirect(message=message, query=filter_query)
 
     @app.post("/media/policy")
-    def media_policy_update(
+    @app.post("/settings/policy")
+    def settings_policy_update(
         request: Request,
         meaningful_minutes: int = Form(),
         meaningful_percent: int = Form(),
@@ -1289,12 +1277,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "plex_fresh_minutes": plex_fresh_minutes,
         }
         if any(value < 1 or value > 525600 for value in values.values()):
-            return _media_redirect(error="Policy values must be positive and within one year.")
+            return _integrations_redirect(
+                error="Policy values must be positive and within one year."
+            )
         if meaningful_percent > 100:
-            return _media_redirect(error="Meaningful playback percent cannot exceed 100.")
+            return _integrations_redirect(
+                error="Meaningful playback percent cannot exceed 100."
+            )
         normalized_tag = protected_tag_name.strip()
         if not normalized_tag or len(normalized_tag) > 120:
-            return _media_redirect(error="Protected Arr tag must be 1 to 120 characters.")
+            return _integrations_redirect(
+                error="Protected Arr tag must be 1 to 120 characters."
+            )
         policy = get_inventory_policy(session)
         for key, value in values.items():
             setattr(policy, key, value)
@@ -1320,8 +1314,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             payload={**values, "protected_tag_name": normalized_tag},
         )
         session.commit()
-        return _media_redirect(
-            message="Inventory policy saved. Existing evidence was re-evaluated fail-closed."
+        return _integrations_redirect(
+            message="Retention settings saved. Existing evidence was re-evaluated fail-closed."
         )
 
     @app.get("/media/{lifecycle_id}", response_class=HTMLResponse)

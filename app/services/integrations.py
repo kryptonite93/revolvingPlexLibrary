@@ -45,8 +45,6 @@ def create_integration(
     name: str,
     base_url: str,
     api_key: str = "",
-    username: str = "",
-    password: str = "",
     discovered_from_instance_id: str | None = None,
     external_id: str | None = None,
 ) -> IntegrationInstance:
@@ -59,12 +57,9 @@ def create_integration(
 
     credentials: dict[str, str]
     if normalized_kind == "QBITTORRENT":
-        if api_key.strip():
-            credentials = {"api_key": api_key.strip()}
-        elif username.strip() and password:
-            credentials = {"username": username.strip(), "password": password}
-        else:
-            raise ValueError("qBittorrent requires an API key or username and password")
+        if not api_key.strip():
+            raise ValueError("qBittorrent API key is required")
+        credentials = {"api_key": api_key.strip()}
     else:
         if not api_key.strip():
             raise ValueError("API key or token is required")
@@ -102,8 +97,6 @@ def update_integration(
     name: str,
     base_url: str,
     api_key: str = "",
-    username: str = "",
-    password: str = "",
 ) -> bool:
     normalized_url = normalize_base_url(base_url)
     if not name.strip():
@@ -120,16 +113,7 @@ def update_integration(
 
     credentials_replaced = False
     credentials = cipher.decrypt(integration.credentials_encrypted)
-    if integration.kind == "QBITTORRENT":
-        if api_key.strip():
-            credentials = {"api_key": api_key.strip()}
-            credentials_replaced = True
-        elif username.strip() or password:
-            if not username.strip() or not password:
-                raise ValueError("qBittorrent requires both username and password")
-            credentials = {"username": username.strip(), "password": password}
-            credentials_replaced = True
-    elif api_key.strip():
+    if api_key.strip():
         credentials = {"api_key": api_key.strip()}
         credentials_replaced = True
 

@@ -57,19 +57,8 @@
       </div>
     </section>
 
-    <details class="policy-drawer">
-      <summary>Inventory policy and freshness thresholds</summary>
-      <form method="post" action="/media/policy" class="policy-form">
-        <input type="hidden" name="csrf" value="{{ csrf_token }}">
-        <fieldset><legend>Meaningful playback</legend><label>Minimum minutes<input type="number" name="meaningful_minutes" min="1" max="1440" value="{{ policy.meaningful_minutes }}" required></label><label>Minimum percent<input type="number" name="meaningful_percent" min="1" max="100" value="{{ policy.meaningful_percent }}" required></label></fieldset>
-        <fieldset><legend>Retention</legend><label>Never watched · weeks<input type="number" name="never_watched_weeks" min="1" max="520" value="{{ policy.never_watched_weeks }}" required></label><label>After meaningful watch · weeks<input type="number" name="watched_weeks" min="1" max="520" value="{{ policy.watched_weeks }}" required></label><label class="wide-field">Protected Arr tag<input name="protected_tag_name" maxlength="120" value="{{ policy.protected_tag_name }}" required></label></fieldset>
-        <fieldset class="freshness-fields"><legend>Freshness windows · minutes</legend><label>Tautulli<input type="number" name="tautulli_fresh_minutes" min="1" value="{{ policy.tautulli_fresh_minutes }}" required></label><label>qBittorrent<input type="number" name="torrent_fresh_minutes" min="1" value="{{ policy.torrent_fresh_minutes }}" required></label><label>Arr<input type="number" name="arr_fresh_minutes" min="1" value="{{ policy.arr_fresh_minutes }}" required></label><label>Overseerr<input type="number" name="overseerr_fresh_minutes" min="1" value="{{ policy.overseerr_fresh_minutes }}" required></label><label>Plex<input type="number" name="plex_fresh_minutes" min="1" value="{{ policy.plex_fresh_minutes }}" required></label></fieldset>
-        <div class="policy-save"><p>Saving recalculates decisions from stored evidence. It does not call any external mutation API.</p><button class="button button-primary" type="submit">Save inventory policy</button></div>
-      </form>
-    </details>
-
     <section class="lifecycle-workbench" aria-labelledby="workbench-title">
-      <div class="workbench-heading"><div><h2 id="workbench-title">Decision workbench</h2><p>Filter lifecycle evidence, inspect a title, or protect exactly the results you choose.</p></div><a class="button button-secondary" href="/integrations">Sync sources</a></div>
+      <div class="workbench-heading"><div><h2 id="workbench-title">Decision workbench</h2><p>Filter lifecycle evidence, inspect a title, or protect exactly the results you choose.</p></div><a class="button button-secondary" href="/settings">Sync sources</a></div>
 
       <form class="media-filters" method="get" action="/media" aria-label="Filter media lifecycles">
         <div class="media-filter-grid">
@@ -120,7 +109,7 @@
       </form>
       {% else %}
         {% if active_filter_count %}<div class="empty-state media-empty"><h3>No lifecycles match these filters</h3><p>Clear one or more filters to widen the workbench. Stored inventory has not been changed.</p><a class="button button-primary" href="/media">Clear filters</a></div>
-        {% else %}<div class="empty-state media-empty"><h3>The workbench is ready for evidence</h3><p>Enable and synchronize Radarr or Sonarr to create lifecycle case files. Nothing is inferred from folder names alone.</p><a class="button button-primary" href="/integrations">Open integrations</a></div>{% endif %}
+        {% else %}<div class="empty-state media-empty"><h3>The workbench is ready for evidence</h3><p>Enable and synchronize Radarr or Sonarr to create lifecycle case files. Nothing is inferred from folder names alone.</p><a class="button button-primary" href="/settings">Open settings</a></div>{% endif %}
       {% endif %}
     </section>
   </main>

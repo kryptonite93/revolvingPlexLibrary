@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Consolidated connection, retention, and freshness configuration under a Settings page at the bottom of the navigation.
+- Simplified qBittorrent authentication to API keys for version 5.2 and newer.
 - Added reversible manual protection for selected media or every lifecycle matching the current Media filters.
 - Added compact text protection indicators to collapsed television-series rows.
 - Versioned static asset URLs so container updates cannot reuse incompatible cached styles or scripts.

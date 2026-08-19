@@ -106,27 +106,7 @@ def test_tautulli_health_uses_read_only_info_command() -> None:
     assert result.version == "v2.15.3"
 
 
-def test_qbittorrent_cookie_auth_then_reads_version() -> None:
-    methods: list[str] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        methods.append(request.method)
-        if request.url.path.endswith("/auth/login"):
-            assert request.headers["Referer"] == "http://qbittorrent:8080/"
-            return httpx.Response(200, text="Ok.", headers={"Set-Cookie": "SID=test; path=/"})
-        assert "SID=test" in request.headers["Cookie"]
-        return httpx.Response(200, text="v5.1.2")
-
-    result = QBittorrentAdapter(
-        "http://qbittorrent:8080",
-        {"username": "admin", "password": "password"},
-        client_factory(handler),
-    ).test_connection()
-    assert result.version == "v5.1.2"
-    assert methods == ["POST", "GET"]
-
-
-def test_qbittorrent_api_key_skips_login() -> None:
+def test_qbittorrent_api_key_authenticates_with_bearer_token() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.method == "GET"
         assert request.headers["Authorization"] == "Bearer qbt_example"

@@ -29,7 +29,25 @@ def authenticate(client: TestClient) -> str:
         follow_redirects=False,
     )
     assert response.status_code == 303
-    return csrf_from(client.get("/integrations"))
+    return csrf_from(client.get("/settings"))
+
+
+def test_settings_is_the_last_configuration_destination(client: TestClient) -> None:
+    authenticate(client)
+    page = client.get("/settings")
+
+    assert page.status_code == 200
+    assert "<title>Settings · Revolving Plex Manager</title>" in page.text
+    assert 'href="/settings" aria-current="page">Settings</a>' in page.text
+    assert page.text.index(">Media</a>") < page.text.index(">Deletion queue</span>")
+    assert page.text.index(">Deletion queue</span>") < page.text.index(">Audit log</span>")
+    assert page.text.index(">Audit log</span>") < page.text.index(">Settings</a>")
+    assert "Retention and freshness" in page.text
+    assert "Connected services" in page.text
+
+    legacy_page = client.get("/integrations")
+    assert legacy_page.status_code == 200
+    assert "<h1>Settings</h1>" in legacy_page.text
 
 
 def test_new_integration_is_encrypted_and_disabled(client: TestClient, app) -> None:
@@ -137,17 +155,28 @@ def test_failed_connection_uses_error_notice(client: TestClient, app, monkeypatc
     assert "Connection failed" in response.text
 
 
-def test_qbittorrent_cookie_credentials_are_encrypted(client: TestClient, app) -> None:
+def test_qbittorrent_api_key_is_required_and_encrypted(client: TestClient, app) -> None:
     csrf = authenticate(client)
-    response = client.post(
+    rejected = client.post(
         "/integrations",
         data={
             "kind": "QBITTORRENT",
             "name": "Downloads",
             "base_url": "http://qbittorrent:8080",
             "api_key": "",
-            "username": "admin",
-            "password": "cookie-password",
+            "csrf": csrf,
+        },
+    )
+    assert rejected.status_code == 422
+    assert "qBittorrent API key is required" in rejected.text
+
+    response = client.post(
+        "/integrations",
+        data={
+            "kind": "QBITTORRENT",
+            "name": "Downloads",
+            "base_url": "http://qbittorrent:8080",
+            "api_key": "qbt_secret_key",
             "csrf": csrf,
         },
         follow_redirects=False,
@@ -157,8 +186,14 @@ def test_qbittorrent_cookie_credentials_are_encrypted(client: TestClient, app) -
         integration = session.scalar(select(IntegrationInstance))
         assert integration is not None
         assert integration.active_management_enabled is False
-        assert "cookie-password" not in integration.credentials_encrypted
-    assert "cookie-password" not in client.get("/integrations").text
+        assert "qbt_secret_key" not in integration.credentials_encrypted
+        credentials = app.state.credential_cipher.decrypt(integration.credentials_encrypted)
+        assert credentials == {"api_key": "qbt_secret_key"}
+    page = client.get("/integrations")
+    assert "qbt_secret_key" not in page.text
+    assert "cookie login" not in page.text
+    assert 'name="username"' not in page.text
+    assert 'name="password"' not in page.text
 
 
 def test_integration_credentials_can_be_replaced_without_redisplaying_secret(
@@ -171,8 +206,7 @@ def test_integration_credentials_can_be_replaced_without_redisplaying_secret(
             "kind": "QBITTORRENT",
             "name": "Downloads",
             "base_url": "http://qbittorrent:8080",
-            "username": "admin",
-            "password": "wrong-password",
+            "api_key": "qbt_wrong_key",
             "csrf": csrf,
         },
     )
@@ -181,7 +215,7 @@ def test_integration_credentials_can_be_replaced_without_redisplaying_secret(
 
     edit_page = client.get(f"/integrations/{integration_id}/edit")
     assert edit_page.status_code == 200
-    assert "wrong-password" not in edit_page.text
+    assert "qbt_wrong_key" not in edit_page.text
     assert 'value="Downloads"' in edit_page.text
 
     response = client.post(
@@ -189,9 +223,7 @@ def test_integration_credentials_can_be_replaced_without_redisplaying_secret(
         data={
             "name": "Downloads",
             "base_url": "http://qbittorrent:8080",
-            "api_key": "",
-            "username": "admin",
-            "password": "correct-password",
+            "api_key": "qbt_correct_key",
             "csrf": csrf_from(edit_page),
         },
         follow_redirects=False,
@@ -201,7 +233,7 @@ def test_integration_credentials_can_be_replaced_without_redisplaying_secret(
         integration = session.get(IntegrationInstance, integration_id)
         assert integration is not None
         credentials = app.state.credential_cipher.decrypt(integration.credentials_encrypted)
-        assert credentials == {"username": "admin", "password": "correct-password"}
+        assert credentials == {"api_key": "qbt_correct_key"}
 
 
 def test_integration_removal_requires_name_and_deletes_only_local_records(
@@ -214,8 +246,7 @@ def test_integration_removal_requires_name_and_deletes_only_local_records(
             "kind": "QBITTORRENT",
             "name": "Downloads",
             "base_url": "http://qbittorrent:8080",
-            "username": "admin",
-            "password": "wrong-password",
+            "api_key": "qbt_removal_key",
             "csrf": csrf,
         },
     )
