@@ -930,6 +930,10 @@ def test_media_workbench_groups_tv_and_filters_large_inventory(client, app) -> N
     assert "The Show" in page.text
     assert "2 seasons" in page.text
     assert "1 of 2 seasons protected" in page.text
+    assert '<span class="series-protection-state">' in page.text
+    assert '<svg aria-hidden="true" viewBox="0 0 24 24">' not in page.text
+    assert "/static/app.css?v=" in page.text
+    assert "/static/media-selection.js?v=" in page.text
     assert "Not downloaded" in page.text
     assert "Unmonitored in Sonarr" in page.text
     assert 'name="source"' in page.text

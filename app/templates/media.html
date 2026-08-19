@@ -105,7 +105,7 @@
           <details class="series-group">
             <summary class="series-summary">
               <label class="series-select"><input type="checkbox" data-series-checkbox data-series-key="{{ entry.integration.id }}-{{ entry.rows[0].lifecycle.arr_item_id }}" aria-label="Select every visible season of {{ entry.title }}"></label>
-              <span class="series-identity"><span class="media-spine media-spine-season" aria-hidden="true">TV</span><span class="lifecycle-title"><strong>{{ entry.title }}</strong><small>{{ entry.integration.name }} · {{ entry.rows|length }} {{ 'season' if entry.rows|length == 1 else 'seasons' }}</small>{% if entry.protected_count %}<span class="series-protection-state{% if not entry.fully_protected %} is-partial{% endif %}"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3 5.5 5.7v5.2c0 4.2 2.6 8 6.5 10.1 3.9-2.1 6.5-5.9 6.5-10.1V5.7L12 3Z"/><path d="m9 12 2 2 4-4"/></svg>{{ entry.protected_count }} of {{ entry.rows|length }} {{ 'season' if entry.rows|length == 1 else 'seasons' }} protected</span>{% endif %}</span></span>
+              <span class="series-identity"><span class="media-spine media-spine-season" aria-hidden="true">TV</span><span class="lifecycle-title"><strong>{{ entry.title }}</strong><small>{{ entry.integration.name }} · {{ entry.rows|length }} {{ 'season' if entry.rows|length == 1 else 'seasons' }}</small>{% if entry.protected_count %}<span class="series-protection-state">{{ entry.protected_count }} of {{ entry.rows|length }} {{ 'season' if entry.rows|length == 1 else 'seasons' }} protected</span>{% endif %}</span></span>
               <span class="series-counts"><strong>{{ entry.active_count }} downloaded</strong><small>{% if entry.missing_count %}{{ entry.missing_count }} not downloaded{% else %}Every listed season is downloaded{% endif %}</small></span>
               <span class="series-deadline"><small>Next retention deadline</small><strong>{% if entry.next_deadline %}{{ format_date(entry.next_deadline) }}{% else %}No active deadline{% endif %}</strong></span>
             </summary>
@@ -126,4 +126,4 @@
   </main>
 </div>
 {% endblock %}
-{% block scripts %}<script src="{{ url_for('static', path='/media-selection.js') }}" defer></script>{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', path='/media-selection.js') }}?v={{ static_asset_version }}" defer></script>{% endblock %}

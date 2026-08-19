@@ -37,10 +37,6 @@ class WorkbenchEntry:
         )
 
     @property
-    def fully_protected(self) -> bool:
-        return bool(self.rows) and self.protected_count == len(self.rows)
-
-    @property
     def next_deadline(self) -> datetime | None:
         deadlines = [
             row.lifecycle.retention_deadline

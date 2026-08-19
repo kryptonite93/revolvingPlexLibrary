@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import uuid
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
@@ -70,6 +71,18 @@ APP_ROOT = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=APP_ROOT / "templates")
 
 
+def _static_asset_version() -> str:
+    digest = hashlib.sha256()
+    for path in sorted((APP_ROOT / "static").iterdir()):
+        if path.is_file():
+            digest.update(path.name.encode())
+            digest.update(path.read_bytes())
+    return digest.hexdigest()[:12]
+
+
+STATIC_ASSET_VERSION = _static_asset_version()
+
+
 def _session(request: Request):
     yield from request.app.state.database.session()
 
@@ -99,6 +112,7 @@ def _render(request: Request, name: str, context: dict | None = None, status_cod
     values = {
         "request": request,
         "app_name": request.app.state.settings.app_name,
+        "static_asset_version": STATIC_ASSET_VERSION,
         "csrf_token": csrf_token(request),
         "error": None,
         "errors": {},

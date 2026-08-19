@@ -3,7 +3,8 @@
 ## Unreleased
 
 - Added reversible manual protection for selected media or every lifecycle matching the current Media filters.
-- Added full and partial protection indicators to collapsed television-series rows.
+- Added compact text protection indicators to collapsed television-series rows.
+- Versioned static asset URLs so container updates cannot reuse incompatible cached styles or scripts.
 - Prevented missing media and pre-import television playback from producing removal-review deadlines.
 - Named the integrations whose stale data is blocking a lifecycle decision.
 - Grouped television seasons by series and added searchable, paginated Media filters.

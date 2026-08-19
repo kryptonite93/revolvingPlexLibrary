@@ -73,8 +73,6 @@ def test_workbench_summarizes_partial_and_full_series_protection() -> None:
     entry = build_workbench_page(rows, sort="title", page=1).entries[0]
 
     assert entry.protected_count == 1
-    assert entry.fully_protected is False
 
     rows[1].lifecycle.protection_state = "PROTECTED"
     assert entry.protected_count == 2
-    assert entry.fully_protected is True
