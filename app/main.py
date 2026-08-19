@@ -1637,7 +1637,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         mapped = session.execute(
             select(TorrentMediaMapping, Torrent)
             .join(Torrent, TorrentMediaMapping.torrent_id == Torrent.id)
-            .where(TorrentMediaMapping.lifecycle_id == lifecycle.id)
+            .where(
+                TorrentMediaMapping.lifecycle_id == lifecycle.id,
+                Torrent.present.is_(True),
+            )
         ).all()
         shared_media_by_torrent: dict[
             str,

@@ -226,7 +226,11 @@ def evaluate_dry_run(session: Session) -> DryRunSummary:
         .where(MediaLifecycle.state == "ACTIVE")
         .order_by(MediaIdentity.canonical_title, MediaIdentity.season_number)
     ).all()
-    mappings = session.scalars(select(TorrentMediaMapping)).all()
+    mappings = session.scalars(
+        select(TorrentMediaMapping)
+        .join(Torrent, TorrentMediaMapping.torrent_id == Torrent.id)
+        .where(Torrent.present.is_(True))
+    ).all()
     mappings_by_lifecycle: dict[str, list[TorrentMediaMapping]] = {}
     mappings_by_torrent: dict[str, list[TorrentMediaMapping]] = {}
     mapping_count_by_torrent: dict[str, int] = {}

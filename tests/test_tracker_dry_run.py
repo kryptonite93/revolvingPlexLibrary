@@ -192,6 +192,28 @@ def test_qbittorrent_sync_stores_actual_seeding_duration(app) -> None:
         assert torrent.seeding_seconds == 456_789
 
 
+def test_qbittorrent_sync_removes_mapping_when_torrent_disappears(app) -> None:
+    with app.state.database.session_factory() as session:
+        lifecycle = add_candidate(session)
+        qbit = session.scalar(
+            select(IntegrationInstance).where(IntegrationInstance.kind == "QBITTORRENT")
+        )
+        assert qbit is not None
+        assert session.scalar(select(TorrentMediaMapping)) is not None
+
+        sync_qbittorrent(session, qbit, {"api_key": "unused"}, rows=[])
+        summary = evaluate_dry_run(session)
+        proposal = session.scalar(
+            select(DryRunProposal).where(DryRunProposal.lifecycle_id == lifecycle.id)
+        )
+
+        assert session.scalar(select(TorrentMediaMapping)) is None
+        assert summary.eligible == 1
+        assert summary.blocked == 0
+        assert proposal is not None
+        assert proposal.reason_code == "DRY_RUN_ELIGIBLE_NO_TORRENT"
+
+
 def test_dry_run_marks_candidate_eligible_only_when_every_tracker_rule_passes(app) -> None:
     with app.state.database.session_factory() as session:
         lifecycle = add_candidate(session)

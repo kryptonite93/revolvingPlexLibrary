@@ -952,16 +952,23 @@ def sync_qbittorrent(
                 )
             )
             tracker_count += 1
-    _map_torrents(session)
+    _map_torrents(session, integration.id)
     return {"torrents": len(rows), "trackers": tracker_count}
 
 
-def _map_torrents(session: Session) -> None:
-    current_torrent_ids = select(Torrent.id).where(Torrent.present.is_(True))
+def _map_torrents(session: Session, integration_id: str | None = None) -> None:
+    integration_torrent_ids = select(Torrent.id)
+    if integration_id is not None:
+        integration_torrent_ids = integration_torrent_ids.where(
+            Torrent.integration_id == integration_id
+        )
     session.query(TorrentMediaMapping).filter(
-        TorrentMediaMapping.torrent_id.in_(current_torrent_ids)
+        TorrentMediaMapping.torrent_id.in_(integration_torrent_ids)
     ).delete(synchronize_session=False)
-    torrents = session.scalars(select(Torrent).where(Torrent.present.is_(True))).all()
+    current_torrents = select(Torrent).where(Torrent.present.is_(True))
+    if integration_id is not None:
+        current_torrents = current_torrents.where(Torrent.integration_id == integration_id)
+    torrents = session.scalars(current_torrents).all()
     lifecycles = session.scalars(
         select(MediaLifecycle).where(MediaLifecycle.state == "ACTIVE")
     ).all()

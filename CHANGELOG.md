@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Removed stale media mappings when torrents disappear from qBittorrent and excluded absent torrents from current deletion evidence.
 - Exposed every other title sharing a mapped torrent on lifecycle evidence pages and named those titles in blocked deletion-preview reasons.
 - Added state filters to the dedicated Deletion Queue and made its calculation action amber only when the preview is out of date.
 - Made Save actions neutral until their form changes, then amber while work remains unsaved.
