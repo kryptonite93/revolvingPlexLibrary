@@ -228,12 +228,15 @@ def evaluate_dry_run(session: Session) -> DryRunSummary:
     ).all()
     mappings = session.scalars(select(TorrentMediaMapping)).all()
     mappings_by_lifecycle: dict[str, list[TorrentMediaMapping]] = {}
+    mappings_by_torrent: dict[str, list[TorrentMediaMapping]] = {}
     mapping_count_by_torrent: dict[str, int] = {}
     for mapping in mappings:
         mappings_by_lifecycle.setdefault(mapping.lifecycle_id, []).append(mapping)
+        mappings_by_torrent.setdefault(mapping.torrent_id, []).append(mapping)
         mapping_count_by_torrent[mapping.torrent_id] = (
             mapping_count_by_torrent.get(mapping.torrent_id, 0) + 1
         )
+    identities_by_lifecycle = {lifecycle.id: identity for lifecycle, identity, _ in records}
     torrents = {torrent.id: torrent for torrent in session.scalars(select(Torrent)).all()}
     trackers_by_torrent: dict[str, list[TorrentTracker]] = {}
     for tracker in session.scalars(select(TorrentTracker)).all():
@@ -287,9 +290,30 @@ def evaluate_dry_run(session: Session) -> DryRunSummary:
                 mapping_count_by_torrent[mapping.torrent_id] > 1
                 for mapping in lifecycle_mappings
             ):
+                shared_titles = sorted(
+                    {
+                        identities_by_lifecycle[other.lifecycle_id].canonical_title
+                        for mapping in lifecycle_mappings
+                        for other in mappings_by_torrent[mapping.torrent_id]
+                        if other.lifecycle_id != lifecycle.id
+                        and other.lifecycle_id in identities_by_lifecycle
+                    }
+                )
+                if shared_titles:
+                    visible_titles = shared_titles[:3]
+                    shared_label = ", ".join(visible_titles)
+                    if len(shared_titles) > len(visible_titles):
+                        shared_label += f", and {len(shared_titles) - len(visible_titles)} more"
+                    reason = (
+                        f"A torrent also maps to {shared_label}; automatic cleanup is blocked"
+                    )
+                else:
+                    reason = (
+                        "A torrent maps to another media item; automatic cleanup is blocked"
+                    )
                 code, reason = (
                     "SHARED_TORRENT_MAPPING",
-                    "A torrent maps to more than one movie or season; automatic cleanup is blocked",
+                    reason,
                 )
             else:
                 tracker_failure: tuple[str, str] | None = None

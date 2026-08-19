@@ -222,6 +222,51 @@ def test_dry_run_marks_candidate_eligible_only_when_every_tracker_rule_passes(ap
         assert proposal.reason_code == "TRACKER_AUTOMATION_DISABLED"
 
 
+def test_dry_run_names_other_titles_sharing_a_torrent(app) -> None:
+    with app.state.database.session_factory() as session:
+        lifecycle = add_candidate(session)
+        arr = session.get(IntegrationInstance, lifecycle.integration_id)
+        torrent = session.scalar(select(Torrent))
+        assert arr is not None
+        assert torrent is not None
+        other_identity = MediaIdentity(
+            media_type="MOVIE",
+            source_key="radarr:2",
+            canonical_title="The Other Holiday Movie",
+        )
+        session.add(other_identity)
+        session.flush()
+        other_lifecycle = MediaLifecycle(
+            identity_id=other_identity.id,
+            integration_id=arr.id,
+            arr_item_id=2,
+            state="ACTIVE",
+            protection_state="UNPROTECTED",
+            decision="REVIEW_ELIGIBLE",
+            decision_reason="Retention elapsed",
+            current_size=20_000,
+        )
+        session.add(other_lifecycle)
+        session.flush()
+        session.add(
+            TorrentMediaMapping(
+                torrent_id=torrent.id,
+                lifecycle_id=other_lifecycle.id,
+                mapping_source="ARR_DOWNLOAD_ID",
+                confidence="EXACT",
+            )
+        )
+
+        evaluate_dry_run(session)
+        proposal = session.scalar(
+            select(DryRunProposal).where(DryRunProposal.lifecycle_id == lifecycle.id)
+        )
+
+        assert proposal is not None
+        assert proposal.reason_code == "SHARED_TORRENT_MAPPING"
+        assert "The Other Holiday Movie" in proposal.reason_text
+
+
 def test_tracker_policy_settings_are_discovered_and_saved(client, app) -> None:
     authenticate(client)
     with app.state.database.session_factory() as session:

@@ -220,7 +220,7 @@ The empty workbench names the missing evidence source and points to integrations
 
 ### Lifecycle Case File
 
-The detail surface enlarges the media spine and verdict, then presents a four-stop timeline for original import, meaningful watch, retention deadline, and protection. Files and revisions, torrent mapping, playback evidence, and request protection use paired divider-led evidence ledgers; a source-freshness ledger closes the case file. Unknown, unmapped, and unavailable evidence is written in place and explains when eligibility is blocked.
+The detail surface enlarges the media spine and verdict, then presents a four-stop timeline for original import, meaningful watch, retention deadline, and protection. Files and revisions, torrent mapping, playback evidence, and request protection use paired divider-led evidence ledgers; a source-freshness ledger closes the case file. Torrent headings state how many torrents link to the current title. When a torrent also maps elsewhere, a compact warning names and links every other lifecycle so a shared-torrent block can be verified directly. Unknown, unmapped, and unavailable evidence is written in place and explains when eligibility is blocked.
 
 ### Integration Setup
 
@@ -238,7 +238,7 @@ The preview lives on the dedicated Deletion Queue page and evaluates stored evid
 
 An Arr item with no torrent currently associated in qBittorrent treats tracker obligations as not applicable and may remain eligible based on retention and protection evidence. Once a torrent association exists, its mapping confidence, completion state, tracker policy, ratio, and seed time become mandatory gates.
 
-Shared torrents, including a future multi-season pack, fail closed when one torrent maps to more than one movie or season. The preview must name that shared mapping and block automatic cleanup until a dedicated mapping workflow is implemented and tested.
+Shared torrents, including a future multi-season pack, fail closed when one torrent maps to more than one movie or season. The preview names the other mapped titles, and each lifecycle case file exposes the complete reverse mapping before automatic cleanup remains blocked. A dedicated mapping workflow must be implemented and tested before that block can be overridden.
 
 ## Do's and Don'ts
 

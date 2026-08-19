@@ -419,6 +419,15 @@ p { text-wrap: pretty; }
 .evidence-list > div { display: grid; gap: 0.32rem; padding: 1rem 0; border-bottom: 1px solid var(--border); }
 .evidence-list > div > span, .evidence-list > div > small { color: var(--muted); font-size: 0.78rem; line-height: 1.45; }
 .evidence-list > div > strong { overflow-wrap: anywhere; font-size: 0.88rem; }
+.shared-mapping-evidence { display: grid; gap: 0.45rem; margin-top: 0.55rem; padding-top: 0.8rem; border-top: 1px solid var(--border); }
+.shared-mapping-evidence > strong { font-size: smaller; }
+.shared-mapping-evidence > p { max-width: 62ch; margin: 0; color: var(--muted); font-size: smaller; line-height: 1.45; }
+.shared-mapping-evidence > div { display: grid; }
+.shared-mapping-evidence a { display: grid; gap: 0.18rem; padding: 0.6rem 0; border-top: 1px solid var(--border); text-decoration: none; }
+.shared-mapping-evidence a:first-child { border-top: 0; }
+.shared-mapping-evidence a span { overflow-wrap: anywhere; font-weight: 720; }
+.shared-mapping-evidence a small { color: var(--muted); font-size: smaller; line-height: 1.4; }
+.shared-mapping-evidence a:hover span { color: var(--primary); }
 .file-group-title { margin: 1rem 0 0; color: var(--muted); font-size: 0.76rem; font-weight: 760; }
 .file-state-current { color: var(--primary); font-style: normal; font-weight: 760; }
 .revision-history { margin-top: 0.8rem; border-top: 1px solid var(--border); }

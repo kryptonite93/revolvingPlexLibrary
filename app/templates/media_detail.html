@@ -33,8 +33,23 @@
           <div class="evidence-list">{% for file in previous_files %}<div><strong>{{ file.path or 'Path unavailable' }}</strong><span>Previously observed; not currently reported by {{ integration.name }} · {% if file.imported_at %}Imported {{ format_date(file.imported_at) }}{% else %}Import time unavailable{% endif %} · {{ file.quality or 'Quality unavailable' }} · {{ ((file.size or 0) / 1073741824)|round(2) }} GiB</span></div>{% endfor %}</div>
         </details>{% endif %}
       </section>
-      <section class="evidence-section"><div class="section-heading"><h2>Torrent mapping</h2><p>{{ mapped|length }} matched</p></div>
-        <div class="evidence-list">{% for mapping, torrent in mapped %}<div><strong>{{ torrent.name }}</strong><span>{{ mapping.mapping_source|replace('_', ' ')|title }} · {{ mapping.confidence|title }} confidence · {{ torrent.state or 'state unknown' }} · ratio {{ torrent.ratio|round(2) if torrent.ratio is not none else 'unknown' }}</span><small>{% for tracker in trackers_by_torrent.get(torrent.id, []) %}{{ tracker.host }} · status {{ tracker.status if tracker.status is not none else 'unknown' }}{% if tracker.message %} · {{ tracker.message }}{% endif %}{% if not loop.last %}<br>{% endif %}{% else %}No tracker metadata{% endfor %}</small></div>{% else %}<p class="empty-inline">No exact download ID or high-confidence content-path match.</p>{% endfor %}</div>
+      <section class="evidence-section"><div class="section-heading"><h2>Torrent mapping</h2><p>{{ mapped|length }} {{ 'torrent' if mapped|length == 1 else 'torrents' }} linked to this title</p></div>
+        <div class="evidence-list torrent-evidence-list">{% for mapping, torrent in mapped %}
+          {% set shared_media = shared_media_by_torrent.get(torrent.id, []) %}
+          <div class="torrent-evidence-record">
+            <strong>{{ torrent.name }}</strong>
+            <span>{{ mapping.mapping_source|replace('_', ' ')|title }} · {{ mapping.confidence|title }} confidence · {{ torrent.state or 'state unknown' }} · ratio {{ torrent.ratio|round(2) if torrent.ratio is not none else 'unknown' }}</span>
+            <small>{% for tracker in trackers_by_torrent.get(torrent.id, []) %}{{ tracker.host }} · status {{ tracker.status if tracker.status is not none else 'unknown' }}{% if tracker.message %} · {{ tracker.message }}{% endif %}{% if not loop.last %}<br>{% endif %}{% else %}No tracker metadata{% endfor %}</small>
+            {% if shared_media %}<div class="shared-mapping-evidence">
+              <strong class="health-error">Also linked to {{ shared_media|length }} other {{ 'title' if shared_media|length == 1 else 'titles' }}</strong>
+              <p>Automatic cleanup is blocked because removing this torrent could affect every title listed here.</p>
+              <div>{% for other_mapping, other_lifecycle, other_identity, other_integration in shared_media %}
+                {% set other_specials = other_identity.media_type == 'SEASON' and other_identity.season_number == 0 %}
+                <a href="/media/{{ other_lifecycle.id }}"><span>{{ other_identity.canonical_title|replace(' · Season 0', ' · Specials') if other_specials else other_identity.canonical_title }}</span><small>{{ other_integration.name }} · {{ other_mapping.confidence|title }} confidence {{ other_mapping.mapping_source|replace('_', ' ')|lower }} match</small></a>
+              {% endfor %}</div>
+            </div>{% endif %}
+          </div>
+        {% else %}<p class="empty-inline">No exact download ID or high-confidence content-path match.</p>{% endfor %}</div>
       </section>
       <section class="evidence-section"><div class="section-heading"><h2>Playback evidence</h2><p>{{ playbacks|length }} meaningful</p></div>
         <div class="evidence-list">{% for playback in playbacks %}<div><strong>{{ format_datetime(playback.watched_at) }}</strong><span>{{ (playback.duration_seconds / 60)|round|int }} minutes · {{ playback.progress_percent|round|int }}%{% if playback.watched %} · watched{% endif %}</span></div>{% else %}<p class="empty-inline">No playback can be mapped to this lifecycle yet. The decision remains fail-closed when required.</p>{% endfor %}</div>

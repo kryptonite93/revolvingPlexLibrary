@@ -1639,6 +1639,47 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             .join(Torrent, TorrentMediaMapping.torrent_id == Torrent.id)
             .where(TorrentMediaMapping.lifecycle_id == lifecycle.id)
         ).all()
+        shared_media_by_torrent: dict[
+            str,
+            list[tuple[TorrentMediaMapping, MediaLifecycle, MediaIdentity, IntegrationInstance]],
+        ] = {}
+        mapped_torrent_ids = [torrent.id for _mapping, torrent in mapped]
+        if mapped_torrent_ids:
+            shared_rows = session.execute(
+                select(
+                    TorrentMediaMapping,
+                    MediaLifecycle,
+                    MediaIdentity,
+                    IntegrationInstance,
+                )
+                .join(
+                    MediaLifecycle,
+                    TorrentMediaMapping.lifecycle_id == MediaLifecycle.id,
+                )
+                .join(MediaIdentity, MediaLifecycle.identity_id == MediaIdentity.id)
+                .join(
+                    IntegrationInstance,
+                    MediaLifecycle.integration_id == IntegrationInstance.id,
+                )
+                .where(
+                    TorrentMediaMapping.torrent_id.in_(mapped_torrent_ids),
+                    TorrentMediaMapping.lifecycle_id != lifecycle.id,
+                )
+                .order_by(
+                    MediaIdentity.canonical_title,
+                    MediaIdentity.season_number,
+                    IntegrationInstance.name,
+                )
+            ).all()
+            for other_mapping, other_lifecycle, other_identity, other_integration in shared_rows:
+                shared_media_by_torrent.setdefault(other_mapping.torrent_id, []).append(
+                    (
+                        other_mapping,
+                        other_lifecycle,
+                        other_identity,
+                        other_integration,
+                    )
+                )
         trackers_by_torrent: dict[str, list[TorrentTracker]] = {}
         for _mapping, torrent in mapped:
             trackers_by_torrent[torrent.id] = session.scalars(
@@ -1688,6 +1729,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "integration": integration,
                 "files": files,
                 "mapped": mapped,
+                "shared_media_by_torrent": shared_media_by_torrent,
                 "trackers_by_torrent": trackers_by_torrent,
                 "playbacks": playbacks,
                 "requests": requests,

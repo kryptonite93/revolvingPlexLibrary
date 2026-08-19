@@ -19,6 +19,8 @@ from app.persistence.models import (
     RequesterProfile,
     RequestRecord,
     SourceFreshness,
+    Torrent,
+    TorrentMediaMapping,
 )
 from app.services.inventory import (
     _apply_playback,
@@ -937,6 +939,99 @@ def test_media_detail_separates_current_files_from_previous_revisions(client, ap
     assert detail.text.index("current-remux.mkv") < detail.text.index("previous-release.mp4")
     assert '<details class="revision-history">' in detail.text
     assert "Files and revisions" not in detail.text
+
+
+def test_media_detail_names_every_other_title_sharing_a_torrent(client, app) -> None:
+    authenticate(client)
+    with app.state.database.session_factory() as session:
+        radarr = IntegrationInstance(
+            kind="RADARR",
+            name="Radarr-1080P",
+            base_url="http://radarr:7878",
+            enabled=True,
+            management_mode="MANAGED",
+            credentials_encrypted=app.state.credential_cipher.encrypt({"api_key": "secret"}),
+        )
+        sonarr = IntegrationInstance(
+            kind="SONARR",
+            name="Sonarr-1080P",
+            base_url="http://sonarr:8989",
+            enabled=True,
+            management_mode="MANAGED",
+            credentials_encrypted=app.state.credential_cipher.encrypt({"api_key": "secret"}),
+        )
+        qbit = IntegrationInstance(
+            kind="QBITTORRENT",
+            name="qBittorrent",
+            base_url="http://qbittorrent:8080",
+            enabled=True,
+            credentials_encrypted=app.state.credential_cipher.encrypt({"api_key": "secret"}),
+        )
+        arthur = MediaIdentity(
+            media_type="MOVIE",
+            source_key="tmdb:51052",
+            canonical_title="Arthur Christmas",
+        )
+        shared_season = MediaIdentity(
+            media_type="SEASON",
+            source_key="tvdb:123:season:1",
+            canonical_title="Holiday Collection · Season 1",
+            season_number=1,
+        )
+        session.add_all([radarr, sonarr, qbit, arthur, shared_season])
+        session.flush()
+        arthur_lifecycle = MediaLifecycle(
+            identity_id=arthur.id,
+            integration_id=radarr.id,
+            arr_item_id=42,
+            state="ACTIVE",
+            protection_state="UNPROTECTED",
+            current_path="/movies/Arthur Christmas/current-remux.mkv",
+        )
+        season_lifecycle = MediaLifecycle(
+            identity_id=shared_season.id,
+            integration_id=sonarr.id,
+            arr_item_id=7,
+            state="ACTIVE",
+            protection_state="UNPROTECTED",
+            current_path="/tv/Holiday Collection/Season 01/episode.mkv",
+        )
+        torrent = Torrent(
+            integration_id=qbit.id,
+            info_hash="shared-hash",
+            name="Shared holiday torrent",
+            present=True,
+        )
+        session.add_all([arthur_lifecycle, season_lifecycle, torrent])
+        session.flush()
+        session.add_all(
+            [
+                TorrentMediaMapping(
+                    torrent_id=torrent.id,
+                    lifecycle_id=arthur_lifecycle.id,
+                    mapping_source="ARR_DOWNLOAD_ID",
+                    confidence="EXACT",
+                ),
+                TorrentMediaMapping(
+                    torrent_id=torrent.id,
+                    lifecycle_id=season_lifecycle.id,
+                    mapping_source="CONTENT_PATH",
+                    confidence="HIGH",
+                ),
+            ]
+        )
+        session.commit()
+        lifecycle_id = arthur_lifecycle.id
+        shared_lifecycle_id = season_lifecycle.id
+
+    detail = client.get(f"/media/{lifecycle_id}")
+
+    assert detail.status_code == 200
+    assert "1 torrent linked to this title" in detail.text
+    assert "Also linked to 1 other title" in detail.text
+    assert "Holiday Collection · Season 1" in detail.text
+    assert "Sonarr-1080P · High confidence content path match" in detail.text
+    assert f'href="/media/{shared_lifecycle_id}"' in detail.text
 
 
 def test_recompute_clears_a_watch_that_predates_import(app) -> None:
