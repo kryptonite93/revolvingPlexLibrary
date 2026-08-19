@@ -22,7 +22,7 @@
 
           <label>{% if integration.kind == "QBITTORRENT" %}New qBittorrent API key{% else %}New API key or token{% endif %}<input type="password" name="api_key" autocomplete="new-password" aria-describedby="edit-api-key-help{% if errors.api_key %} edit-api-key-error{% endif %}" {% if errors.api_key %}aria-invalid="true"{% endif %}><small id="edit-api-key-help">Leave blank to keep the stored credential.{% if integration.kind == "QBITTORRENT" %} API keys require qBittorrent 5.2 or newer.{% endif %}</small>{% if errors.api_key %}<small class="field-error" id="edit-api-key-error">{{ errors.api_key }}</small>{% endif %}</label>
 
-          <div class="form-actions"><button class="button button-primary" type="submit">Save changes</button><a class="button button-quiet" href="/settings">Cancel</a></div>
+          <div class="form-actions"><button class="button button-secondary" type="submit" data-save-button>Save changes</button><a class="button button-quiet" href="/settings">Cancel</a></div>
           <p class="settings-safety">Changing the URL or credential automatically disables the integration and clears its previous health result. Test it before enabling read-only sync again.</p>
         </form>
       </section>

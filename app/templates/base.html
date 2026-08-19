@@ -18,6 +18,7 @@
       FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md
     -->
     {% block body %}{% endblock %}
+    <script src="{{ url_for('static', path='/form-state.js') }}?v={{ static_asset_version }}" defer></script>
     {% block scripts %}{% endblock %}
   </body>
 </html>

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Added state filters to the dedicated Deletion Queue and made its calculation action amber only when the preview is out of date.
+- Made Save actions neutral until their form changes, then amber while work remains unsaved.
+- Made tracker minimum seed time a whole-day field with matching server validation.
+- Moved each tracker rule's explicit save action into its header and made unsaved changes visible.
 - Treated retained Arr media without a current qBittorrent mapping as tracker-not-applicable instead of permanently blocking cleanup review, and added the total eligible storage to the deletion preview.
 - Replaced the automatically expanded tracker list with a searchable Add trackers picker and a compact selected-rule view.
 - Added per-tracker ratio/seed-time policies and a persisted, fail-closed read-only deletion preview.

@@ -17,7 +17,7 @@
 
     <section class="settings-section tracker-policy-section" aria-labelledby="tracker-policy-title">
       <div class="section-heading tracker-heading">
-        <div><h2 id="tracker-policy-title">Tracker rules</h2><p>Set seeding obligations for the trackers you use. Every tracker attached to a torrent must pass.</p></div>
+        <div><h2 id="tracker-policy-title">Tracker rules</h2><p>Set seeding obligations for the trackers you use. Each tracker rule saves separately, and every tracker attached to a torrent must pass.</p></div>
         <div class="tracker-heading-actions">
           <span class="safety-lock">Unselected trackers block cleanup</span>
           <button class="button button-secondary" type="button" data-tracker-dialog-open {% if not available_tracker_domains %}disabled aria-describedby="tracker-picker-unavailable"{% endif %}>Add trackers</button>
@@ -30,12 +30,15 @@
         <article class="tracker-policy-row">
           <header class="tracker-policy-identity">
             <div><h3>{{ tracker.domain }}</h3><p>{{ tracker.torrent_count }} active torrent{% if tracker.torrent_count != 1 %}s{% endif %}</p></div>
-            {% if not tracker_policy %}<span class="state-label state-untested">Not configured</span>
-            {% elif tracker_policy.combination == "NEVER_REMOVE" %}<span class="state-label state-protected">Never remove</span>
-            {% elif tracker_policy.automatic_deletion_allowed %}<span class="state-label state-enabled">Tracker gate permits cleanup</span>
-            {% else %}<span class="state-label state-disabled">Manual review only</span>{% endif %}
+            <div class="tracker-policy-header-actions">
+              {% if not tracker_policy %}<span class="state-label state-untested">Not configured</span>
+              {% elif tracker_policy.combination == "NEVER_REMOVE" %}<span class="state-label state-protected">Never remove</span>
+              {% elif tracker_policy.automatic_deletion_allowed %}<span class="state-label state-enabled">Tracker gate permits cleanup</span>
+              {% else %}<span class="state-label state-disabled">Manual review only</span>{% endif %}
+              <button class="button button-secondary tracker-policy-save" type="submit" form="tracker-policy-form-{{ loop.index }}" aria-label="Save tracker rule for {{ tracker.domain }}" data-save-button data-dirty-label="Save changes">Save rule</button>
+            </div>
           </header>
-          <form method="post" action="/settings/tracker-policy" class="tracker-policy-form">
+          <form id="tracker-policy-form-{{ loop.index }}" method="post" action="/settings/tracker-policy" class="tracker-policy-form">
             <input type="hidden" name="csrf" value="{{ csrf_token }}">
             <input type="hidden" name="domain" value="{{ tracker.domain }}">
             <label>Requirement<select name="combination" data-policy-requirement required>
@@ -46,10 +49,9 @@
               <option value="NEVER_REMOVE" {% if tracker_policy and tracker_policy.combination == "NEVER_REMOVE" %}selected{% endif %}>Never remove</option>
             </select></label>
             <label data-policy-field="ratio" {% if tracker_policy and tracker_policy.combination in ('TIME_ONLY', 'NEVER_REMOVE') %}class="policy-field-disabled"{% endif %}>Minimum ratio<input type="number" name="minimum_ratio" min="0.01" max="1000" step="0.01" value="{{ tracker_policy.minimum_ratio if tracker_policy and tracker_policy.minimum_ratio is not none else 1.0 }}" {% if tracker_policy and tracker_policy.combination in ('TIME_ONLY', 'NEVER_REMOVE') %}disabled{% endif %}></label>
-            <label data-policy-field="time" {% if tracker_policy and tracker_policy.combination in ('RATIO_ONLY', 'NEVER_REMOVE') %}class="policy-field-disabled"{% endif %}>Minimum seed · days<input type="number" name="minimum_seed_days" min="0.01" max="3650" step="0.25" value="{{ (tracker_policy.minimum_seed_seconds / 86400)|round(2) if tracker_policy and tracker_policy.minimum_seed_seconds is not none else 10 }}" {% if tracker_policy and tracker_policy.combination in ('RATIO_ONLY', 'NEVER_REMOVE') %}disabled{% endif %}></label>
+            <label data-policy-field="time" {% if tracker_policy and tracker_policy.combination in ('RATIO_ONLY', 'NEVER_REMOVE') %}class="policy-field-disabled"{% endif %}>Minimum seed · days<input type="number" name="minimum_seed_days" min="1" max="3650" step="1" value="{{ (tracker_policy.minimum_seed_seconds / 86400)|round|int if tracker_policy and tracker_policy.minimum_seed_seconds is not none else 10 }}" {% if tracker_policy and tracker_policy.combination in ('RATIO_ONLY', 'NEVER_REMOVE') %}disabled{% endif %}></label>
             <label data-policy-field="grace" {% if tracker_policy and tracker_policy.combination == 'NEVER_REMOVE' %}class="policy-field-disabled"{% endif %}>Grace period · hours<input type="number" name="grace_hours" min="0" max="8760" step="0.5" value="{{ (tracker_policy.grace_period_seconds / 3600)|round(2) if tracker_policy else 12 }}" {% if tracker_policy and tracker_policy.combination == 'NEVER_REMOVE' %}disabled{% endif %}><small>Minimum completed seeding age, even if the ratio is already met.</small></label>
             <label class="tracker-automation-check{% if tracker_policy and tracker_policy.combination == 'NEVER_REMOVE' %} policy-field-disabled{% endif %}" data-policy-field="automation"><input type="checkbox" name="automatic_deletion_allowed" value="yes" {% if tracker_policy and tracker_policy.automatic_deletion_allowed %}checked{% endif %} {% if tracker_policy and tracker_policy.combination == 'NEVER_REMOVE' %}disabled{% endif %}><span><strong>Permit future automatic cleanup</strong><small>This only satisfies one future safety gate. Inventory Only still prevents every external change.</small></span></label>
-            <button class="button button-secondary" type="submit">Save {{ tracker.domain }} rule</button>
             <p class="tracker-policy-mode-note" data-policy-note aria-live="polite">{% if tracker_policy and tracker_policy.combination == 'NEVER_REMOVE' %}Never remove blocks cleanup for this tracker; other policy fields do not apply.{% elif tracker_policy and tracker_policy.combination == 'RATIO_ONLY' %}Seed time is not used; the ratio and grace period must pass.{% elif tracker_policy and tracker_policy.combination == 'TIME_ONLY' %}Ratio is not used; seed time and the grace period must pass.{% else %}Both ratio and seed time are available for this rule.{% endif %}</p>
           </form>
         </article>
@@ -87,38 +89,11 @@
             {% endfor %}
           </fieldset>
           <footer class="tracker-picker-footer">
-            <p>Unselected trackers remain blocked in deletion previews.</p>
-            <div><button class="button button-quiet" type="button" data-tracker-dialog-close>Cancel</button><button class="button button-primary" type="submit">Save tracker selection</button></div>
+            <p>Unselected trackers found on mapped torrents remain blocked in deletion previews.</p>
+            <div><button class="button button-quiet" type="button" data-tracker-dialog-close>Cancel</button><button class="button button-secondary" type="submit" data-save-button>Save tracker selection</button></div>
           </footer>
         </form>
       </dialog>
-      {% endif %}
-    </section>
-
-    <section class="settings-section dry-run-section" aria-labelledby="dry-run-title">
-      <div class="section-heading dry-run-heading">
-        <div><h2 id="dry-run-title">Read-only deletion preview</h2><p>Replays the full safety decision using stored evidence. It never contacts a service or changes a file, torrent, request, or monitoring state.</p></div>
-        <form method="post" action="/settings/dry-run"><input type="hidden" name="csrf" value="{{ csrf_token }}"><button class="button button-primary" type="submit">Recalculate preview</button></form>
-      </div>
-      {% if dry_run_evaluated_at %}
-      <div class="dry-run-summary" aria-label="Latest dry-run summary">
-        <div><strong>{{ dry_run_counts.get('ELIGIBLE', 0) }}</strong><span>Eligible in simulation</span></div>
-        <div><strong>{{ dry_run_counts.get('BLOCKED', 0) }}</strong><span>Blocked by missing or unsafe evidence</span></div>
-        <div><strong>{{ dry_run_counts.get('RETAINED', 0) }}</strong><span>Still inside retention</span></div>
-        <div><strong>{{ dry_run_counts.get('PROTECTED', 0) }}</strong><span>Protected</span></div>
-        <div><strong>{{ ((dry_run_eligible_bytes or 0) / 1073741824)|round(2) }} GiB</strong><span>Eligible storage that could be freed</span></div>
-        <p>Last evaluated {{ format_datetime(dry_run_evaluated_at) }} · No external actions are available in Inventory Only.</p>
-      </div>
-      <div class="dry-run-list" aria-label="Latest dry-run results">
-        {% for proposal, lifecycle, identity, integration in dry_run_rows %}
-        <a class="dry-run-row" href="/media/{{ lifecycle.id }}">
-          <span class="dry-run-title"><strong>{{ identity.canonical_title }}{% if identity.media_type == 'SEASON' %} · {{ 'Specials' if identity.season_number == 0 else 'Season ' ~ identity.season_number }}{% endif %}</strong><small>{{ integration.name }} · {{ ((proposal.estimated_bytes or 0) / 1073741824)|round(2) }} GiB</small></span>
-          <span class="dry-run-reason"><em class="dry-run-state dry-run-{{ proposal.state|lower }}">{% if proposal.state == 'ELIGIBLE' %}Eligible in simulation{% else %}{{ proposal.state|title }}{% endif %}</em><small>{{ proposal.reason_text }}</small><span class="view-evidence">View evidence</span></span>
-        </a>
-        {% endfor %}
-      </div>
-      {% else %}
-      <div class="empty-state"><h3>No preview calculated yet</h3><p>Configure tracker rules, then recalculate. The first run will explain every eligible, retained, protected, or blocked downloaded item.</p></div>
       {% endif %}
     </section>
 
@@ -131,7 +106,7 @@
         <fieldset><legend>Meaningful playback</legend><label>Minimum minutes<input type="number" name="meaningful_minutes" min="1" max="1440" value="{{ policy.meaningful_minutes }}" required></label><label>Minimum percent<input type="number" name="meaningful_percent" min="1" max="100" value="{{ policy.meaningful_percent }}" required></label></fieldset>
         <fieldset><legend>Retention</legend><label>Never watched · weeks<input type="number" name="never_watched_weeks" min="1" max="520" value="{{ policy.never_watched_weeks }}" required></label><label>After meaningful watch · weeks<input type="number" name="watched_weeks" min="1" max="520" value="{{ policy.watched_weeks }}" required></label><label class="wide-field">Protected Arr tag<input name="protected_tag_name" maxlength="120" value="{{ policy.protected_tag_name }}" required></label></fieldset>
         <fieldset class="freshness-fields"><legend>Freshness windows · minutes</legend><label>Tautulli<input type="number" name="tautulli_fresh_minutes" min="1" value="{{ policy.tautulli_fresh_minutes }}" required></label><label>qBittorrent<input type="number" name="torrent_fresh_minutes" min="1" value="{{ policy.torrent_fresh_minutes }}" required></label><label>Arr<input type="number" name="arr_fresh_minutes" min="1" value="{{ policy.arr_fresh_minutes }}" required></label><label>Overseerr<input type="number" name="overseerr_fresh_minutes" min="1" value="{{ policy.overseerr_fresh_minutes }}" required></label><label>Plex<input type="number" name="plex_fresh_minutes" min="1" value="{{ policy.plex_fresh_minutes }}" required></label></fieldset>
-        <div class="policy-save"><p>Saving recalculates decisions from stored evidence. It does not call any external mutation API.</p><button class="button button-primary" type="submit">Save retention settings</button></div>
+        <div class="policy-save"><p>Saving recalculates decisions from stored evidence. It does not call any external mutation API.</p><button class="button button-secondary" type="submit" data-save-button>Save retention settings</button></div>
       </form>
     </section>
 
@@ -262,7 +237,7 @@
           <label>Display name<input name="name" value="{{ form.name if form else '' }}" placeholder="Living room Plex" maxlength="120" {% if errors.name %}aria-invalid="true" aria-describedby="name-error"{% endif %} required>{% if errors.name %}<small class="field-error" id="name-error">{{ errors.name }}</small>{% endif %}</label>
           <label>Internal URL<input type="url" name="base_url" value="{{ form.base_url if form else '' }}" placeholder="http://192.168.1.20:32400" aria-describedby="base-url-help{% if errors.base_url %} base-url-error{% endif %}" {% if errors.base_url %}aria-invalid="true"{% endif %} required><small id="base-url-help">Include any configured base path.</small>{% if errors.base_url %}<small class="field-error" id="base-url-error">{{ errors.base_url }}</small>{% endif %}</label>
           <label>API key or token<input type="password" name="api_key" autocomplete="off" aria-describedby="api-key-help{% if errors.api_key %} api-key-error{% endif %}" {% if errors.api_key %}aria-invalid="true"{% endif %} required><small id="api-key-help">Required. qBittorrent requires version 5.2 or newer and an API key generated in its Web UI settings.</small>{% if errors.api_key %}<small class="field-error" id="api-key-error">{{ errors.api_key }}</small>{% endif %}</label>
-          <button class="button button-primary" type="submit">Save disabled service</button>
+          <button class="button button-secondary" type="submit" data-save-button>Save disabled service</button>
         </form>
       </aside>
     </section>

@@ -16,6 +16,7 @@ from app.persistence.models import (
     TrackerPolicy,
 )
 from app.services.dry_run import evaluate_dry_run
+from app.services.events import append_event
 from app.services.inventory import sync_qbittorrent
 
 
@@ -138,7 +139,7 @@ def test_dry_run_allows_review_candidate_without_current_torrent_mapping(app) ->
         assert proposal.eligibility_snapshot["torrents"] == []
 
 
-def test_settings_sum_storage_for_every_eligible_proposal(client, app) -> None:
+def test_deletion_queue_sums_storage_for_every_eligible_proposal(client, app) -> None:
     authenticate(client)
     with app.state.database.session_factory() as session:
         lifecycle = add_candidate(session)
@@ -147,7 +148,7 @@ def test_settings_sum_storage_for_every_eligible_proposal(client, app) -> None:
         evaluate_dry_run(session)
         session.commit()
 
-    page = client.get("/settings")
+    page = client.get("/deletion-queue")
 
     assert page.status_code == 200
     assert "Eligible storage that could be freed" in page.text
@@ -221,7 +222,7 @@ def test_dry_run_marks_candidate_eligible_only_when_every_tracker_rule_passes(ap
         assert proposal.reason_code == "TRACKER_AUTOMATION_DISABLED"
 
 
-def test_tracker_policy_settings_are_discovered_saved_and_re_evaluated(client, app) -> None:
+def test_tracker_policy_settings_are_discovered_and_saved(client, app) -> None:
     authenticate(client)
     with app.state.database.session_factory() as session:
         add_candidate(session, tracker_domain="private.example")
@@ -244,6 +245,9 @@ def test_tracker_policy_settings_are_discovered_saved_and_re_evaluated(client, a
     assert selection.status_code == 200
     assert "Tracker selection saved. 1 rule shown." in selection.text
     assert 'name="domain" value="private.example"' in selection.text
+    assert 'class="button button-secondary tracker-policy-save"' in selection.text
+    assert "data-save-button" in selection.text
+    assert 'name="minimum_seed_days" min="1" max="3650" step="1"' in selection.text
     response = client.post(
         "/settings/tracker-policy",
         data={
@@ -260,8 +264,10 @@ def test_tracker_policy_settings_are_discovered_saved_and_re_evaluated(client, a
 
     assert response.status_code == 200
     assert "Tracker policy for private.example saved" in response.text
-    assert "Read-only deletion preview" in response.text
-    assert "Eligible in simulation" in response.text
+    assert "Read-only deletion preview" not in response.text
+    deletion_queue = client.get("/deletion-queue")
+    assert "Read-only deletion preview" in deletion_queue.text
+    assert "Recalculate the deletion preview to apply it to the queue." in response.text
     with app.state.database.session_factory() as session:
         policy = session.scalar(
             select(TrackerPolicy).where(
@@ -272,6 +278,116 @@ def test_tracker_policy_settings_are_discovered_saved_and_re_evaluated(client, a
         assert policy.selected is True
         assert policy.minimum_seed_seconds == 10 * 86_400
         assert policy.automatic_deletion_allowed is True
+
+
+def test_tracker_policy_rejects_fractional_seed_days(client, app) -> None:
+    authenticate(client)
+    with app.state.database.session_factory() as session:
+        add_candidate(session, tracker_domain="private.example")
+        session.commit()
+
+    page = client.get("/settings")
+    selected = client.post(
+        "/settings/tracker-selection",
+        data={"csrf": csrf_from(page), "domains": "private.example"},
+        follow_redirects=True,
+    )
+    response = client.post(
+        "/settings/tracker-policy",
+        data={
+            "csrf": csrf_from(selected),
+            "domain": "private.example",
+            "combination": "TIME_ONLY",
+            "minimum_seed_days": "10.5",
+            "grace_hours": "12",
+        },
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert "Minimum seed time must be a whole number of days." in response.text
+
+
+def test_deletion_queue_filters_results_by_summary_state(client, app) -> None:
+    authenticate(client)
+    with app.state.database.session_factory() as session:
+        eligible = add_candidate(session)
+        eligible_identity = session.get(MediaIdentity, eligible.identity_id)
+        assert eligible_identity is not None
+        eligible_identity.canonical_title = "Eligible Movie"
+        session.query(TorrentMediaMapping).delete()
+        evaluate_dry_run(session)
+
+        blocked_identity = MediaIdentity(
+            media_type="MOVIE",
+            source_key="radarr:blocked",
+            canonical_title="Blocked Movie",
+        )
+        session.add(blocked_identity)
+        session.flush()
+        blocked = MediaLifecycle(
+            identity_id=blocked_identity.id,
+            integration_id=eligible.integration_id,
+            arr_item_id=2,
+            state="ACTIVE",
+            protection_state="UNPROTECTED",
+            decision="REVIEW_ELIGIBLE",
+            decision_reason="Retention elapsed",
+            current_size=20_000,
+        )
+        session.add(blocked)
+        session.flush()
+        session.add(
+            DryRunProposal(
+                lifecycle_id=blocked.id,
+                state="BLOCKED",
+                reason_code="TEST_BLOCK",
+                reason_text="Test-only missing evidence",
+                estimated_bytes=20_000,
+            )
+        )
+        session.commit()
+
+    page = client.get("/deletion-queue?state=BLOCKED")
+
+    assert page.status_code == 200
+    assert 'href="/deletion-queue?state=BLOCKED" aria-current="page"' in page.text
+    assert "<strong>1</strong> blocked result" in page.text
+    assert "Blocked Movie" in page.text
+    assert "Eligible Movie" not in page.text
+
+
+def test_deletion_queue_recalculate_is_yellow_only_when_preview_is_stale(client, app) -> None:
+    authenticate(client)
+    with app.state.database.session_factory() as session:
+        add_candidate(session)
+        evaluate_dry_run(session)
+        session.commit()
+
+    current = client.get("/deletion-queue")
+    assert 'class="button button-secondary" type="submit">Recalculate preview' in current.text
+
+    with app.state.database.session_factory() as session:
+        append_event(
+            session,
+            event_type="inventory.sync_completed",
+            entity_type="integration",
+            entity_id=None,
+            actor_type="system",
+            actor_id=None,
+        )
+        session.commit()
+
+    stale = client.get("/deletion-queue")
+    assert 'class="button button-attention" type="submit">Recalculate preview' in stale.text
+
+    refreshed = client.post(
+        "/deletion-queue/recalculate",
+        data={"csrf": csrf_from(stale)},
+        follow_redirects=True,
+    )
+    assert refreshed.status_code == 200
+    assert 'class="button button-secondary" type="submit">Recalculate preview' in refreshed.text
 
 
 def test_unselected_tracker_rule_is_hidden_and_blocks_dry_run(client, app) -> None:
@@ -311,10 +427,11 @@ def test_unselected_tracker_rule_is_hidden_and_blocks_dry_run(client, app) -> No
                 TrackerPolicy.normalized_domain == "private.example"
             )
         )
+        assert policy is not None
+        assert policy.selected is False
+        evaluate_dry_run(session)
         proposal = session.scalar(
             select(DryRunProposal).where(DryRunProposal.lifecycle_id == lifecycle_id)
         )
-        assert policy is not None
-        assert policy.selected is False
         assert proposal is not None
         assert proposal.reason_code == "TRACKER_POLICY_MISSING"

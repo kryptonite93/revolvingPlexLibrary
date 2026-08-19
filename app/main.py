@@ -174,6 +174,37 @@ def _integration_context(session: Session, sync_activity=None) -> dict:
         for domain in sorted(set(discovered_domains) | set(tracker_policies))
     ]
     tracker_domains = [tracker for tracker in available_tracker_domains if tracker["selected"]]
+    return {
+        "integrations": integrations,
+        "libraries_by_plex": libraries_by_plex,
+        "freshness_by_integration": freshness_by_integration,
+        "requesters_by_integration": requesters_by_integration,
+        "sync_activity": sync_activity,
+        "source_is_fresh": source_is_fresh,
+        "policy": get_inventory_policy(session),
+        "tracker_domains": tracker_domains,
+        "available_tracker_domains": available_tracker_domains,
+    }
+
+
+DRY_RUN_STATES = ("ELIGIBLE", "BLOCKED", "RETAINED", "PROTECTED")
+DRY_RUN_INVALIDATING_EVENTS = (
+    "inventory.sync_completed",
+    "inventory.scheduled_sync_completed",
+    "inventory.policy_changed",
+    "tracker.policy_changed",
+    "tracker.selection_changed",
+    "requester.protection_changed",
+    "media.manual_protection_changed",
+    "media.manual_protection_batch_changed",
+    "plex.library_selection_changed",
+    "integration.management_mode_changed",
+    "integration.removed",
+)
+
+
+def _deletion_queue_context(session: Session, requested_state: str = "") -> dict:
+    active_state = requested_state.upper() if requested_state.upper() in DRY_RUN_STATES else ""
     dry_run_counts = {
         state: int(count)
         for state, count in session.execute(
@@ -189,8 +220,23 @@ def _integration_context(session: Session, sync_activity=None) -> dict:
         )
         or 0
     )
-    dry_run_evaluated_at = session.scalar(select(func.max(DryRunProposal.evaluated_at)))
-    dry_run_rows = session.execute(
+    proposal_evaluated_at = session.scalar(select(func.max(DryRunProposal.evaluated_at)))
+    evaluation_event_at = session.scalar(
+        select(func.max(EventRecord.occurred_at)).where(
+            EventRecord.event_type == "dry_run.evaluated"
+        )
+    )
+    evaluation_times = [value for value in (proposal_evaluated_at, evaluation_event_at) if value]
+    dry_run_evaluated_at = max(evaluation_times) if evaluation_times else None
+    last_invalidating_change = session.scalar(
+        select(func.max(EventRecord.occurred_at)).where(
+            EventRecord.event_type.in_(DRY_RUN_INVALIDATING_EVENTS)
+        )
+    )
+    preview_needs_recalculation = dry_run_evaluated_at is None or bool(
+        last_invalidating_change and last_invalidating_change > dry_run_evaluated_at
+    )
+    rows_query = (
         select(DryRunProposal, MediaLifecycle, MediaIdentity, IntegrationInstance)
         .join(MediaLifecycle, MediaLifecycle.id == DryRunProposal.lifecycle_id)
         .join(MediaIdentity, MediaIdentity.id == MediaLifecycle.identity_id)
@@ -205,22 +251,22 @@ def _integration_context(session: Session, sync_activity=None) -> dict:
             MediaIdentity.canonical_title,
             MediaIdentity.season_number,
         )
-        .limit(30)
-    ).all()
+    )
+    count_query = select(func.count()).select_from(DryRunProposal)
+    if active_state:
+        rows_query = rows_query.where(DryRunProposal.state == active_state)
+        count_query = count_query.where(DryRunProposal.state == active_state)
+    dry_run_rows = session.execute(rows_query.limit(30)).all()
+    filtered_result_count = int(session.scalar(count_query) or 0)
     return {
-        "integrations": integrations,
-        "libraries_by_plex": libraries_by_plex,
-        "freshness_by_integration": freshness_by_integration,
-        "requesters_by_integration": requesters_by_integration,
-        "sync_activity": sync_activity,
-        "source_is_fresh": source_is_fresh,
-        "policy": get_inventory_policy(session),
-        "tracker_domains": tracker_domains,
-        "available_tracker_domains": available_tracker_domains,
         "dry_run_counts": dry_run_counts,
         "dry_run_eligible_bytes": dry_run_eligible_bytes,
         "dry_run_evaluated_at": dry_run_evaluated_at,
         "dry_run_rows": dry_run_rows,
+        "dry_run_states": DRY_RUN_STATES,
+        "active_dry_run_state": active_state,
+        "filtered_result_count": filtered_result_count,
+        "preview_needs_recalculation": preview_needs_recalculation,
     }
 
 
@@ -549,6 +595,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "integrations.html",
             context,
         )
+
+    @app.get("/deletion-queue", response_class=HTMLResponse)
+    def deletion_queue_page(
+        request: Request,
+        message: str | None = None,
+        state: str = Query(""),
+        session: Session = Depends(_session),
+    ):
+        admin = _require_admin(request, session)
+        context = _deletion_queue_context(session, state)
+        context.update({"admin": admin, "message": message})
+        return _render(request, "deletion_queue.html", context)
 
     @app.post("/integrations")
     def integrations_create(
@@ -1413,6 +1471,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         if seed_days is not None and seed_days < 0:
             return _integrations_redirect(error="Minimum seed time cannot be negative.")
+        if seed_days is not None and not seed_days.is_integer():
+            return _integrations_redirect(
+                error="Minimum seed time must be a whole number of days."
+            )
         if grace < 0:
             return _integrations_redirect(error="Grace period cannot be negative.")
         try:
@@ -1427,7 +1489,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 grace_period_seconds=round(grace * 3600),
                 automatic_deletion_allowed=automatic_deletion_allowed == "yes",
             )
-            summary = evaluate_dry_run(session)
         except ValueError as exc:
             session.rollback()
             return _integrations_redirect(error=str(exc))
@@ -1445,14 +1506,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "combination": tracker_policy.combination,
                 "grace_period_seconds": tracker_policy.grace_period_seconds,
                 "automatic_deletion_allowed": tracker_policy.automatic_deletion_allowed,
-                "dry_run_evaluated": summary.evaluated,
             },
         )
         session.commit()
         return _integrations_redirect(
             message=(
                 f"Tracker policy for {normalized_domain} saved. "
-                f"Dry run re-evaluated {summary.evaluated} downloaded items."
+                "Recalculate the deletion preview to apply it to the queue."
             )
         )
 
@@ -1492,7 +1552,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 automatic_deletion_allowed=False,
             )
         session.flush()
-        summary = evaluate_dry_run(session)
         append_event(
             session,
             event_type="tracker.selection_changed",
@@ -1502,7 +1561,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             actor_id=admin.id,
             payload={
                 "selected_domains": sorted(selected_domains),
-                "dry_run_evaluated": summary.evaluated,
             },
         )
         session.commit()
@@ -1511,10 +1569,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             message=f"Tracker selection saved. {count} rule{'s' if count != 1 else ''} shown."
         )
 
-    @app.post("/settings/dry-run")
-    def settings_dry_run(
+    @app.post("/deletion-queue/recalculate")
+    def deletion_queue_recalculate(
         request: Request,
         csrf: str = Form(),
+        state: str = Form(""),
         session: Session = Depends(_session),
     ):
         verify_csrf(request, csrf)
@@ -1538,12 +1597,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             },
         )
         session.commit()
-        return _integrations_redirect(
-            message=(
-                f"Dry run evaluated {summary.evaluated} downloaded items: "
-                f"{summary.eligible} eligible and {summary.blocked} blocked. "
-                "No external changes were made."
-            )
+        message = (
+            f"Dry run evaluated {summary.evaluated} downloaded items: "
+            f"{summary.eligible} eligible and {summary.blocked} blocked. "
+            "No external changes were made."
+        )
+        query = {"message": message}
+        if state.upper() in DRY_RUN_STATES:
+            query["state"] = state.upper()
+        return RedirectResponse(
+            f"/deletion-queue?{urlencode(query)}",
+            status_code=status.HTTP_303_SEE_OTHER,
         )
 
     @app.get("/media/{lifecycle_id}", response_class=HTMLResponse)

@@ -6,7 +6,7 @@
   <nav aria-label="Primary navigation">
     <a href="/dashboard" {% if active_page == "dashboard" %}aria-current="page"{% endif %}>Overview</a>
     <a href="/media" {% if active_page == "media" %}aria-current="page"{% endif %}>Media</a>
-    <span aria-disabled="true">Deletion queue</span>
+    <a href="/deletion-queue" {% if active_page == "deletion-queue" %}aria-current="page"{% endif %}>Deletion queue</a>
     <span aria-disabled="true">Audit log</span>
     <a href="/settings" {% if active_page == "settings" %}aria-current="page"{% endif %}>Settings</a>
   </nav>

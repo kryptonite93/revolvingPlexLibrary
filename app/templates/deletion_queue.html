@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Deletion queue · {{ app_name }}{% endblock %}
+{% block body %}
+<div class="app-shell">
+  {% set active_page = "deletion-queue" %}{% include "_sidebar.html" %}
+  <main class="workspace deletion-queue-workspace">
+    <header class="page-header">
+      <div><h1>Deletion queue</h1><p class="header-support">Review every retention and torrent-safety decision before active management is available.</p></div>
+      <span class="status-pill status-neutral"><span aria-hidden="true"></span>INVENTORY ONLY</span>
+    </header>
+
+    {% if message %}<div class="notice notice-success" role="status">{{ message }}</div>{% endif %}
+
+    <section class="settings-section dry-run-section" aria-labelledby="dry-run-title">
+      <div class="section-heading dry-run-heading">
+        <div><h2 id="dry-run-title">Read-only deletion preview</h2><p>Replays the full safety decision using stored evidence. Select a summary count to inspect that result. Nothing here changes a service, file, torrent, request, or monitoring state.</p></div>
+        <form method="post" action="/deletion-queue/recalculate">
+          <input type="hidden" name="csrf" value="{{ csrf_token }}">
+          <input type="hidden" name="state" value="{{ active_dry_run_state }}">
+          <button class="button {% if preview_needs_recalculation %}button-attention{% else %}button-secondary{% endif %}" type="submit">{% if dry_run_evaluated_at %}Recalculate preview{% else %}Calculate preview{% endif %}</button>
+        </form>
+      </div>
+      {% if dry_run_evaluated_at %}
+      <div class="dry-run-summary" aria-label="Latest dry-run summary">
+        <a href="/deletion-queue?state=ELIGIBLE" {% if active_dry_run_state == 'ELIGIBLE' %}aria-current="page"{% endif %}><strong>{{ dry_run_counts.get('ELIGIBLE', 0) }}</strong><span>Eligible in simulation</span></a>
+        <a href="/deletion-queue?state=BLOCKED" {% if active_dry_run_state == 'BLOCKED' %}aria-current="page"{% endif %}><strong>{{ dry_run_counts.get('BLOCKED', 0) }}</strong><span>Blocked by missing or unsafe evidence</span></a>
+        <a href="/deletion-queue?state=RETAINED" {% if active_dry_run_state == 'RETAINED' %}aria-current="page"{% endif %}><strong>{{ dry_run_counts.get('RETAINED', 0) }}</strong><span>Still inside retention</span></a>
+        <a href="/deletion-queue?state=PROTECTED" {% if active_dry_run_state == 'PROTECTED' %}aria-current="page"{% endif %}><strong>{{ dry_run_counts.get('PROTECTED', 0) }}</strong><span>Protected</span></a>
+        <div><strong>{{ ((dry_run_eligible_bytes or 0) / 1073741824)|round(2) }} GiB</strong><span>Eligible storage that could be freed</span></div>
+        <p>Last evaluated {{ format_datetime(dry_run_evaluated_at) }}{% if preview_needs_recalculation %} · Stored evidence or settings have changed; recalculate for current results.{% else %} · Preview matches the current stored evidence and settings.{% endif %}</p>
+      </div>
+      <div class="dry-run-filter-state">
+        <p><strong>{{ filtered_result_count }}</strong> {{ active_dry_run_state|lower|replace('_', ' ') if active_dry_run_state else 'total' }} {{ 'result' if filtered_result_count == 1 else 'results' }}{% if filtered_result_count > 30 %} · showing first 30{% endif %}</p>
+        {% if active_dry_run_state %}<a class="button button-secondary compact-action" href="/deletion-queue">Show all results</a>{% endif %}
+      </div>
+      <div class="dry-run-list" aria-label="Latest dry-run results">
+        {% for proposal, lifecycle, identity, integration in dry_run_rows %}
+        <a class="dry-run-row" href="/media/{{ lifecycle.id }}">
+          <span class="dry-run-title"><strong>{{ identity.canonical_title }}{% if identity.media_type == 'SEASON' %} · {{ 'Specials' if identity.season_number == 0 else 'Season ' ~ identity.season_number }}{% endif %}</strong><small>{{ integration.name }} · {{ ((proposal.estimated_bytes or 0) / 1073741824)|round(2) }} GiB</small></span>
+          <span class="dry-run-reason"><em class="dry-run-state dry-run-{{ proposal.state|lower }}">{% if proposal.state == 'ELIGIBLE' %}Eligible in simulation{% else %}{{ proposal.state|title }}{% endif %}</em><small>{{ proposal.reason_text }}</small><span class="view-evidence">View evidence</span></span>
+        </a>
+        {% endfor %}
+        {% if not dry_run_rows %}<div class="empty-state"><h3>No {{ active_dry_run_state|lower|replace('_', ' ') }} results</h3><p>The latest preview did not produce any items in this state. Choose another summary count or show all results.</p><a class="button button-secondary" href="/deletion-queue">Show all results</a></div>{% endif %}
+      </div>
+      {% else %}
+      <div class="empty-state"><h3>No preview calculated yet</h3><p>Configure tracker rules in Settings, then recalculate. The first run will explain every eligible, retained, protected, or blocked downloaded item.</p><a class="button button-secondary" href="/settings">Open Settings</a></div>
+      {% endif %}
+    </section>
+  </main>
+</div>
+{% endblock %}

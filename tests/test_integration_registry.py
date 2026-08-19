@@ -39,8 +39,8 @@ def test_settings_is_the_last_configuration_destination(client: TestClient) -> N
     assert page.status_code == 200
     assert "<title>Settings · Revolving Plex Manager</title>" in page.text
     assert 'href="/settings" aria-current="page">Settings</a>' in page.text
-    assert page.text.index(">Media</a>") < page.text.index(">Deletion queue</span>")
-    assert page.text.index(">Deletion queue</span>") < page.text.index(">Audit log</span>")
+    assert page.text.index(">Media</a>") < page.text.index(">Deletion queue</a>")
+    assert page.text.index(">Deletion queue</a>") < page.text.index(">Audit log</span>")
     assert page.text.index(">Audit log</span>") < page.text.index(">Settings</a>")
     assert "Retention and freshness" in page.text
     assert "Connected services" in page.text

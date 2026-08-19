@@ -76,11 +76,13 @@ if (trackerDialog) {
       option.querySelector("input").checked = true;
     });
     updateTrackerStatus();
+    trackerDialog.querySelector("form").dispatchEvent(new Event("input", { bubbles: true }));
   });
   trackerDialog.querySelector("[data-tracker-clear]").addEventListener("click", () => {
     options.forEach((option) => {
       option.querySelector("input").checked = false;
     });
     updateTrackerStatus();
+    trackerDialog.querySelector("form").dispatchEvent(new Event("input", { bubbles: true }));
   });
 }
