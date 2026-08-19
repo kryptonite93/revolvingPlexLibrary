@@ -106,6 +106,7 @@
         <div><strong>{{ dry_run_counts.get('BLOCKED', 0) }}</strong><span>Blocked by missing or unsafe evidence</span></div>
         <div><strong>{{ dry_run_counts.get('RETAINED', 0) }}</strong><span>Still inside retention</span></div>
         <div><strong>{{ dry_run_counts.get('PROTECTED', 0) }}</strong><span>Protected</span></div>
+        <div><strong>{{ ((dry_run_eligible_bytes or 0) / 1073741824)|round(2) }} GiB</strong><span>Eligible storage that could be freed</span></div>
         <p>Last evaluated {{ format_datetime(dry_run_evaluated_at) }} · No external actions are available in Inventory Only.</p>
       </div>
       <div class="dry-run-list" aria-label="Latest dry-run results">

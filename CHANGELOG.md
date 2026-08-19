@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Treated retained Arr media without a current qBittorrent mapping as tracker-not-applicable instead of permanently blocking cleanup review, and added the total eligible storage to the deletion preview.
 - Replaced the automatically expanded tracker list with a searchable Add trackers picker and a compact selected-rule view.
 - Added per-tracker ratio/seed-time policies and a persisted, fail-closed read-only deletion preview.
 - Preserved each season's actual meaningful-watch date while applying forward TV retention resets separately.

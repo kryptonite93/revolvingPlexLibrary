@@ -120,6 +120,40 @@ def test_dry_run_blocks_unknown_tracker_policy(app) -> None:
         assert proposal.eligibility_snapshot["external_mutations"] == []
 
 
+def test_dry_run_allows_review_candidate_without_current_torrent_mapping(app) -> None:
+    with app.state.database.session_factory() as session:
+        lifecycle = add_candidate(session)
+        session.query(TorrentMediaMapping).delete()
+
+        summary = evaluate_dry_run(session)
+        proposal = session.scalar(
+            select(DryRunProposal).where(DryRunProposal.lifecycle_id == lifecycle.id)
+        )
+
+        assert summary.eligible == 1
+        assert summary.blocked == 0
+        assert proposal is not None
+        assert proposal.state == "ELIGIBLE"
+        assert proposal.reason_code == "DRY_RUN_ELIGIBLE_NO_TORRENT"
+        assert proposal.eligibility_snapshot["torrents"] == []
+
+
+def test_settings_sum_storage_for_every_eligible_proposal(client, app) -> None:
+    authenticate(client)
+    with app.state.database.session_factory() as session:
+        lifecycle = add_candidate(session)
+        lifecycle.current_size = 12 * 1_073_741_824
+        session.query(TorrentMediaMapping).delete()
+        evaluate_dry_run(session)
+        session.commit()
+
+    page = client.get("/settings")
+
+    assert page.status_code == 200
+    assert "Eligible storage that could be freed" in page.text
+    assert "12.0 GiB" in page.text
+
+
 def test_qbittorrent_sync_stores_actual_seeding_duration(app) -> None:
     with app.state.database.session_factory() as session:
         qbit = IntegrationInstance(

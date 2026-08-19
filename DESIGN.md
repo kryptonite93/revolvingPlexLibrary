@@ -234,7 +234,9 @@ Tracker rules lead the Settings safety story, but discovered domains do not expa
 
 ### Read-only Deletion Preview
 
-The preview follows tracker rules and evaluates stored evidence without contacting an integration. A compact four-part summary separates eligible-in-simulation, blocked, retained, and protected results; each result then names its reason and carries a persistent View evidence cue into the lifecycle case file. Inventory Only remains visible in the page header and in the preview timestamp line, so an eligible simulation is never presented as executable.
+The preview follows tracker rules and evaluates stored evidence without contacting an integration. A compact five-part summary separates eligible-in-simulation, total eligible storage, blocked, retained, and protected results; each result then names its reason and carries a persistent View evidence cue into the lifecycle case file. Inventory Only remains visible in the page header and in the preview timestamp line, so an eligible simulation is never presented as executable.
+
+An Arr item with no torrent currently associated in qBittorrent treats tracker obligations as not applicable and may remain eligible based on retention and protection evidence. Once a torrent association exists, its mapping confidence, completion state, tracker policy, ratio, and seed time become mandatory gates.
 
 Shared torrents, including a future multi-season pack, fail closed when one torrent maps to more than one movie or season. The preview must name that shared mapping and block automatic cleanup until a dedicated mapping workflow is implemented and tested.
 

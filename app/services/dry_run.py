@@ -271,7 +271,11 @@ def evaluate_dry_run(session: Session) -> DryRunSummary:
         else:
             lifecycle_mappings = mappings_by_lifecycle.get(lifecycle.id, [])
             if not lifecycle_mappings:
-                code, reason = "TORRENT_MAPPING_MISSING", "No torrent mapping exists"
+                state, code = "ELIGIBLE", "DRY_RUN_ELIGIBLE_NO_TORRENT"
+                reason = (
+                    "Retention elapsed and no current qBittorrent torrent is associated; "
+                    "tracker rules do not apply"
+                )
             elif any(
                 mapping.confidence not in CONFIDENT_MAPPINGS for mapping in lifecycle_mappings
             ):

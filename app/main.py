@@ -181,6 +181,14 @@ def _integration_context(session: Session, sync_activity=None) -> dict:
             .group_by(DryRunProposal.state)
         )
     }
+    dry_run_eligible_bytes = int(
+        session.scalar(
+            select(func.coalesce(func.sum(DryRunProposal.estimated_bytes), 0)).where(
+                DryRunProposal.state == "ELIGIBLE"
+            )
+        )
+        or 0
+    )
     dry_run_evaluated_at = session.scalar(select(func.max(DryRunProposal.evaluated_at)))
     dry_run_rows = session.execute(
         select(DryRunProposal, MediaLifecycle, MediaIdentity, IntegrationInstance)
@@ -210,6 +218,7 @@ def _integration_context(session: Session, sync_activity=None) -> dict:
         "tracker_domains": tracker_domains,
         "available_tracker_domains": available_tracker_domains,
         "dry_run_counts": dry_run_counts,
+        "dry_run_eligible_bytes": dry_run_eligible_bytes,
         "dry_run_evaluated_at": dry_run_evaluated_at,
         "dry_run_rows": dry_run_rows,
     }
