@@ -37,3 +37,44 @@ def test_workbench_paginates_title_groups() -> None:
     assert page.page_count == 2
     assert page.total_entries == 52
     assert [entry.title for entry in page.entries] == ["Movie 50", "Movie 51"]
+
+
+def test_workbench_summarizes_partial_and_full_series_protection() -> None:
+    integration = IntegrationInstance(
+        id="sonarr",
+        kind="SONARR",
+        name="Sonarr",
+        base_url="http://sonarr:8989",
+        credentials_encrypted="encrypted",
+    )
+    rows = [
+        WorkbenchRow(
+            lifecycle=MediaLifecycle(
+                id=f"lifecycle-{season}",
+                identity_id=f"identity-{season}",
+                integration_id=integration.id,
+                arr_item_id=7,
+                state="ACTIVE",
+                protection_state="PROTECTED" if season == 1 else "UNPROTECTED",
+            ),
+            identity=MediaIdentity(
+                id=f"identity-{season}",
+                media_type="SEASON",
+                source_key=f"tvdb:100:season:{season}",
+                canonical_title=f"The Show · Season {season}",
+                season_number=season,
+            ),
+            integration=integration,
+            torrent_count=0,
+        )
+        for season in (1, 2)
+    ]
+
+    entry = build_workbench_page(rows, sort="title", page=1).entries[0]
+
+    assert entry.protected_count == 1
+    assert entry.fully_protected is False
+
+    rows[1].lifecycle.protection_state = "PROTECTED"
+    assert entry.protected_count == 2
+    assert entry.fully_protected is True

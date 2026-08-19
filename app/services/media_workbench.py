@@ -31,6 +31,16 @@ class WorkbenchEntry:
         return sum(row.lifecycle.state == "MISSING" for row in self.rows)
 
     @property
+    def protected_count(self) -> int:
+        return sum(
+            row.lifecycle.protection_state == "PROTECTED" for row in self.rows
+        )
+
+    @property
+    def fully_protected(self) -> bool:
+        return bool(self.rows) and self.protected_count == len(self.rows)
+
+    @property
     def next_deadline(self) -> datetime | None:
         deadlines = [
             row.lifecycle.retention_deadline

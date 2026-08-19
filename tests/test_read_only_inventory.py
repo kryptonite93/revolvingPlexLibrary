@@ -895,8 +895,9 @@ def test_media_workbench_groups_tv_and_filters_large_inventory(client, app) -> N
                     arr_item_id=7,
                     state=state,
                     monitored=monitored,
-                    protection_state="UNPROTECTED",
-                    decision="REVIEW_ELIGIBLE" if state == "MISSING" else "BLOCKED_UNKNOWN",
+                    protection_state="PROTECTED" if number == 1 else "UNPROTECTED",
+                    protection_sources=["MANUAL_SELECTION"] if number == 1 else [],
+                    decision="REVIEW_ELIGIBLE" if state == "MISSING" else "KEEP_PROTECTED",
                     decision_reason="Source data incomplete",
                 )
             )
@@ -928,6 +929,7 @@ def test_media_workbench_groups_tv_and_filters_large_inventory(client, app) -> N
 
     assert "The Show" in page.text
     assert "2 seasons" in page.text
+    assert "1 of 2 seasons protected" in page.text
     assert "Not downloaded" in page.text
     assert "Unmonitored in Sonarr" in page.text
     assert 'name="source"' in page.text

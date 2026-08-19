@@ -318,6 +318,9 @@ p { text-wrap: pretty; }
 .series-select { align-self: stretch; display: grid; place-items: center; cursor: pointer; }
 .series-summary:hover .lifecycle-title strong, .series-group[open] > summary .lifecycle-title strong { color: var(--primary); }
 .series-identity { display: flex; align-items: center; gap: 1rem; min-width: 0; }
+.series-protection-state { display: inline-flex; width: fit-content; align-items: center; gap: 0.35rem; margin-top: 0.15rem; padding: 0.3rem 0.5rem; border-radius: 999px; background: oklch(0.784 0.144 79.8 / 0.14); color: oklch(0.9 0.07 79.8); font-size: 0.68rem; font-weight: 800; line-height: 1.2; }
+.series-protection-state.is-partial { background: oklch(0.784 0.08 79.8 / 0.1); color: oklch(0.84 0.055 79.8); }
+.series-protection-state svg { width: 0.85rem; height: 0.85rem; flex: none; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
 .series-counts, .series-deadline { display: grid; gap: 0.35rem; min-width: 0; }
 .series-counts small, .series-deadline small { color: var(--muted); font-size: 0.72rem; line-height: 1.4; }
 .series-counts strong, .series-deadline strong { overflow-wrap: anywhere; font-size: 0.86rem; }
