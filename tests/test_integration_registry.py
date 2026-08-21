@@ -407,7 +407,7 @@ def test_active_management_route_is_blocked_in_inventory_only(client: TestClient
         data={"csrf": csrf_from(page)},
         follow_redirects=True,
     )
-    assert "unavailable while rollout mode is Inventory Only" in response.text
+    assert "Active Management requires the Approval Required rollout mode" in response.text
     page = client.get("/integrations")
     assert "Enable Active Management" not in page.text
     client.post(

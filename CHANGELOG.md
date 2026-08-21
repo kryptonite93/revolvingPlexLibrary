@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added restart-safe, explicitly approved movie deletion jobs for a Managed Radarr instance, with fresh live revalidation, Radarr-first ordering, optional mapped-torrent cleanup, and Plex/Overseerr reconciliation.
+- Added staged global rollout controls and kept Sonarr execution unavailable while the non-4K Radarr manual workflow is validated.
 - Removed stale media mappings when torrents disappear from qBittorrent and excluded absent torrents from current deletion evidence.
 - Exposed every other title sharing a mapped torrent on lifecycle evidence pages and named those titles in blocked deletion-preview reasons.
 - Added state filters to the dedicated Deletion Queue and made its calculation action amber only when the preview is out of date.

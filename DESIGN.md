@@ -118,7 +118,7 @@ The palette is a near-black blue-neutral field with warm ink, tightly rationed a
 
 ### Named Rules
 
-**The Amber Is Earned Rule.** Use amber for selection, progress, protected state, and primary emphasis—not as ambient decoration.
+**The Amber Is Earned Rule.** Use warm amber for selection, current rollout position, pending approval, unsaved forms, and stale calculations—not as ambient decoration. Current Save and Recalculate actions remain neutral; destructive execution remains red.
 
 **The Text Carries State Rule.** Color and dots may reinforce a state, but a visible text label must communicate it.
 
@@ -149,6 +149,8 @@ Desktop uses a persistent 15.5rem sidebar and a bounded workspace with generous 
 The media surface opens with a source-freshness ribbon, followed by a collapsed policy drawer and a chronological lifecycle workbench ordered by retention deadline. Each desktop row aligns title identity, a three-stop evidence track, and a textual verdict. At 1100px the verdict moves beneath the identity and track; at phone widths the track becomes vertical. The detail view expands the same grammar into a four-stop lifecycle timeline, a two-column evidence ledger, and a source-freshness footer; timeline and evidence columns collapse progressively to one column.
 
 Spacing follows a compact 0.45rem–2rem rhythm. Repeated rows are separated by quiet dividers, not individual card shells. Expanded service configuration aligns explanatory copy on the left and the active control on the right, collapsing to a natural reading order on small screens. Policy controls stay secondary inside a disclosure and preserve the same left-to-right reading order before stacking.
+
+Rollout Control pairs a three-stop stage track with one compact confirmation form. The track and form share a row on wide screens, stack below 1100px, and the track turns vertical on phones. A manual approval case opens with title identity and a four-part safety ledger, then divides the next safe action from its chronological execution trail. Those columns stack below 1100px; the ledger reduces to two columns below 880px and one column on phones, where each trail event also becomes a single-column record.
 
 **The One Active Form Rule.** Keep one prominent creation or connection form in view while the surrounding list supplies context and management actions.
 
@@ -240,6 +242,16 @@ An Arr item with no torrent currently associated in qBittorrent treats tracker o
 
 Shared torrents, including a future multi-season pack, fail closed when one torrent maps to more than one movie or season. The preview names the other mapped titles, and each lifecycle case file exposes the complete reverse mapping before automatic cleanup remains blocked. A dedicated mapping workflow must be implemented and tested before that block can be overridden.
 
+### Staged Rollout Control
+
+Rollout Control presents Inventory Only, Dry Run, and Approval Required as a written three-stop safety sequence rather than an unlabeled toggle. Only the current stop receives an amber node; every other stop stays neutral. The adjacent small-radius form explains the selected mode, requires an explicit confirmation for a rollout change, permits immediate retreat to a safer stage, and prevents skipping directly from Inventory Only to Approval Required. Advancing the rollout only reveals the next controls—it never approves a title or starts execution.
+
+### Manual Approval Case / Execution Trail
+
+The queue lists approval cases as flat divider-led rows with title, preparation time, written job state, and current checkpoint. Each title-specific case repeats identity, integration, media type, size, state, and correlation identifier before a four-part safety ledger for rollout, Radarr scope, stored decision, and external-change status. The lower split view keeps one next safe action beside an ordered, immutable execution trail so recovery state is visible before any retry.
+
+Preparing and approving remain app-local steps. Approval requires the exact movie title; execution and resume require the full `DELETE [title]` phrase plus a separate authorization checkbox. Amber marks the pending approval or reconciliation action, red is reserved for external deletion or resume, and cancellation stays quiet. Execution revalidates evidence before mutation, requires Radarr success before qBittorrent cleanup, resumes from saved checkpoints without repeating confirmed work, and isolates Plex or Overseerr convergence in an explicitly named reconciliation state.
+
 ## Do's and Don'ts
 
 ### Do:
@@ -250,6 +262,7 @@ Shared torrents, including a future multi-season pack, fail closed when one torr
 - **Do** use poster-like media geometry to establish context without obscuring URLs, health, or controls.
 - **Do** order lifecycle evidence from source freshness through import, watch, retention, protection, and torrent mapping before future action.
 - **Do** treat each media title as a traceable case file with explicit unknown, stale, blocked, and empty states.
+- **Do** separate preparation, approval, execution, resume, and reconciliation into explicitly named title-scoped steps with a persistent correlation identifier and immutable checkpoint trail.
 - **Do** preserve visible labels, local validation, keyboard focus, and reduced-motion behavior.
 
 ### Don't:
@@ -258,5 +271,6 @@ Shared torrents, including a future multi-season pack, fail closed when one torr
 - **Don't** make destructive controls look equivalent to routine connection or read-only actions.
 - **Don't** turn repeated service records into a generic grid of floating cards.
 - **Don't** collapse lifecycle evidence into a poster grid, a single opaque score, or a color-only verdict.
+- **Don't** imply that approval executed a deletion or let a retry obscure which external steps already completed.
 - **Don't** use ornamental glass, decorative page-load choreography, or graph-heavy console styling.
 - **Don't** expose saved credentials back to the browser.

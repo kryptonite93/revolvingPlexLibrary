@@ -41,7 +41,7 @@ class ArrAdapter:
         return ConnectionTestResult(True, "Read-only connection succeeded.", version)
 
     def get_json(self, path: str, params: dict[str, Any] | None = None) -> Any:
-        """Read one Arr API resource. This adapter intentionally has no mutation methods."""
+        """Read one Arr API resource."""
         with self._client_factory(
             base_url=self.base_url,
             headers={"X-Api-Key": self.api_key, "Accept": "application/json"},
@@ -51,6 +51,30 @@ class ArrAdapter:
             response = client.get(path, params=params)
             response.raise_for_status()
             return response.json()
+
+    def movie(self, movie_id: int) -> dict[str, Any] | None:
+        try:
+            payload = self.get_json(f"/api/v3/movie/{movie_id}")
+        except httpx.HTTPStatusError as error:
+            if error.response.status_code == 404:
+                return None
+            raise
+        if not isinstance(payload, dict):
+            raise ValueError("Radarr returned invalid movie data")
+        return payload
+
+    def delete_movie(self, movie_id: int) -> None:
+        with self._client_factory(
+            base_url=self.base_url,
+            headers={"X-Api-Key": self.api_key, "Accept": "application/json"},
+            timeout=60.0,
+            follow_redirects=False,
+        ) as client:
+            response = client.delete(
+                f"/api/v3/movie/{movie_id}",
+                params={"deleteFiles": "true", "addImportExclusion": "false"},
+            )
+            response.raise_for_status()
 
     def _movie_files(self, movies: list[dict[str, Any]]) -> list[dict[str, Any]]:
         movie_ids = [int(item["id"]) for item in movies if item.get("id") is not None]

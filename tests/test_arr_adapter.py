@@ -75,3 +75,25 @@ def test_arr_history_inventory_follows_every_page() -> None:
 
     assert payload["history"] == [{"id": 1}, {"id": 2}, {"id": 3}]
     assert requested_pages == [1, 2]
+
+
+def test_radarr_delete_removes_files_without_adding_an_exclusion() -> None:
+    observed: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed.append(request)
+        return httpx.Response(200)
+
+    ArrAdapter(
+        "http://radarr:7878",
+        "secret",
+        client_factory=client_factory(handler),
+    ).delete_movie(42)
+
+    assert len(observed) == 1
+    request = observed[0]
+    assert request.method == "DELETE"
+    assert request.url.path == "/api/v3/movie/42"
+    assert request.url.params["deleteFiles"] == "true"
+    assert request.url.params["addImportExclusion"] == "false"
+    assert request.headers["X-Api-Key"] == "secret"

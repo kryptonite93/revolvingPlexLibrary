@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}{{ identity.canonical_title }} approval · {{ app_name }}{% endblock %}
+{% block body %}
+<div class="app-shell">
+  {% set active_page = "deletion-queue" %}{% include "_sidebar.html" %}
+  <main class="workspace deletion-job-workspace">
+    <a class="back-link" href="/deletion-queue">Back to deletion queue</a>
+    <header class="job-case-header">
+      <div class="job-case-identity"><span class="media-spine" aria-hidden="true">M</span><div><h1>{{ identity.canonical_title }}</h1><p>{{ integration.name }} · Movie{% if identity.year %} · {{ identity.year }}{% endif %} · {{ ((job.approval_snapshot.get('media', {}).get('estimated_bytes', lifecycle.current_size or 0)) / 1073741824)|round(2) }} GiB</p></div></div>
+      <div class="job-case-state"><span class="job-state job-state-{{ job.state|lower|replace('_', '-') }}">{{ job.state|replace('_', ' ')|title }}</span><p>{{ job.current_step|replace('_', ' ')|title }}</p><small>Correlation {{ job.correlation_id }}</small></div>
+    </header>
+
+    {% if message %}<div class="notice notice-success" role="status">{{ message }}</div>{% endif %}
+    {% if warning %}<div class="notice notice-warning" role="status">{{ warning }}</div>{% endif %}
+    {% if error %}<div class="notice notice-error" role="alert">{{ error }}</div>{% endif %}
+
+    <section class="job-safety-ledger" aria-label="Execution safety gates">
+      <div><span>Global rollout</span><strong>{{ rollout_policy.mode|replace('_', ' ')|title }}</strong><small>Must remain Approval Required</small></div>
+      <div><span>Radarr scope</span><strong>{{ integration.management_mode|title }} · Active Management {{ 'on' if integration.active_management_enabled else 'off' }}</strong><small>{{ integration.name }}</small></div>
+      <div><span>Stored decision</span><strong>{{ job.approval_snapshot.get('media', {}).get('lifecycle_decision', 'Unavailable')|replace('_', ' ')|title }}</strong><small>Fresh evidence is checked again before deletion</small></div>
+      <div><span>External changes</span><strong>{% if job.started_at %}See execution trail{% else %}None yet{% endif %}</strong><small>Radarr must succeed before qBittorrent</small></div>
+    </section>
+
+    <div class="job-detail-columns">
+      <section class="job-action-panel" aria-labelledby="job-action-title">
+        <div class="section-heading"><div><h2 id="job-action-title">Next safe action</h2><p>Every consequential step remains explicit.</p></div></div>
+        {% if job.state == 'PENDING_APPROVAL' %}
+        <form method="post" action="/deletion-jobs/{{ job.id }}/approve" class="form-stack approval-form">
+          <input type="hidden" name="csrf" value="{{ csrf_token }}">
+          <p>Approval records your intent but does not contact Radarr, Plex, Overseerr, or qBittorrent.</p>
+          <label>Type the movie title exactly<input name="confirm_title" autocomplete="off" aria-describedby="approval-title-help" required><small id="approval-title-help">{{ identity.canonical_title }}</small></label>
+          <button class="button button-attention" type="submit">Approve this movie</button>
+        </form>
+        {% elif job.state in ('APPROVED', 'BLOCKED', 'FAILED') %}
+        <form method="post" action="/deletion-jobs/{{ job.id }}/execute" class="form-stack execution-form">
+          <input type="hidden" name="csrf" value="{{ csrf_token }}">
+          <div class="execution-warning"><strong>This action deletes library content</strong><p>Radarr will remove the movie and its files without creating an import exclusion. Only after Radarr confirms success may mapped torrent data be removed.</p></div>
+          <label>Type the full confirmation phrase<input name="confirm_phrase" autocomplete="off" aria-describedby="execution-phrase-help" required><small id="execution-phrase-help">DELETE {{ identity.canonical_title }}</small></label>
+          <label class="confirmation-check"><input type="checkbox" name="acknowledge" value="yes" required><span><strong>I authorize this exact movie deletion</strong><small>Fresh source data, active Plex sessions, mappings, and tracker rules will be checked first.</small></span></label>
+          <button class="button button-danger" type="submit">Execute approved deletion</button>
+        </form>
+        {% elif job.state in ('RADARR_DELETE_REQUESTED', 'RADARR_DELETED', 'TORRENT_DELETE_REQUESTED', 'TORRENT_DELETED', 'PLEX_REFRESH_REQUESTED', 'PLEX_REFRESHED') %}
+        <form method="post" action="/deletion-jobs/{{ job.id }}/execute" class="form-stack execution-form">
+          <input type="hidden" name="csrf" value="{{ csrf_token }}">
+          <div class="execution-warning"><strong>An external step may already have completed</strong><p>The saved checkpoint is {{ job.state|replace('_', ' ')|lower }}. Resuming checks the current external state and continues forward; it does not repeat a confirmed step.</p></div>
+          <label>Type the full confirmation phrase<input name="confirm_phrase" autocomplete="off" aria-describedby="resume-phrase-help" required><small id="resume-phrase-help">DELETE {{ identity.canonical_title }}</small></label>
+          <label class="confirmation-check"><input type="checkbox" name="acknowledge" value="yes" required><span><strong>I authorize resuming this exact movie workflow</strong><small>The execution trail shows which external steps were requested and confirmed.</small></span></label>
+          <button class="button button-danger" type="submit">Resume approved workflow</button>
+        </form>
+        {% elif job.state == 'RECONCILE_REQUIRED' %}
+        <div class="reconcile-panel"><p>Radarr has already removed the movie. Plex or Overseerr has not converged yet; this action only refreshes and checks those services.</p><form method="post" action="/deletion-jobs/{{ job.id }}/reconcile"><input type="hidden" name="csrf" value="{{ csrf_token }}"><button class="button button-attention" type="submit">Retry reconciliation</button></form></div>
+        {% elif job.state == 'COMPLETED' %}<div class="completion-panel"><strong>Workflow complete</strong><p>Radarr absence, torrent handling, Plex absence, and Overseerr requestability have been recorded.</p></div>
+        {% elif job.state == 'CANCELLED' %}<div class="empty-state compact-empty"><h3>Approval cancelled</h3><p>This case made no external change.</p></div>
+        {% else %}<div class="notice notice-warning"><p>This job stopped at {{ job.current_step|replace('_', ' ')|lower }}. Reload the page after the current request finishes.</p></div>{% endif %}
+
+        {% if job.state in ('PENDING_APPROVAL', 'APPROVED', 'BLOCKED', 'FAILED') %}<form method="post" action="/deletion-jobs/{{ job.id }}/cancel" class="cancel-job-form"><input type="hidden" name="csrf" value="{{ csrf_token }}"><button class="button button-quiet" type="submit">Cancel approval case</button></form>{% endif %}
+      </section>
+
+      <section class="job-trail" aria-labelledby="job-trail-title">
+        <div class="section-heading"><div><h2 id="job-trail-title">Execution trail</h2><p>{{ events|length }} immutable {{ 'event' if events|length == 1 else 'events' }}</p></div></div>
+        <ol>{% for event in events %}<li><span>{{ format_datetime(event.occurred_at) }}</span><strong>{{ event.event_type|replace('.', ' ')|replace('_', ' ')|title }}</strong><small>{% if event.payload.get('current') %}{{ event.payload.get('current')|replace('_', ' ')|title }} · {% endif %}{{ event.payload.get('step', event.payload.get('code', 'Recorded'))|replace('_', ' ')|title }}</small></li>{% endfor %}</ol>
+        {% if job.last_error %}<div class="notice notice-error"><strong>{{ job.failure_code|replace('_', ' ')|title }}</strong><p>{{ job.last_error }}</p></div>{% endif %}
+      </section>
+    </div>
+  </main>
+</div>
+{% endblock %}

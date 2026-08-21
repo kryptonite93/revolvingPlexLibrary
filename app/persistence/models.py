@@ -152,6 +152,16 @@ class InventoryPolicy(Base):
     )
 
 
+class RolloutPolicy(Base):
+    __tablename__ = "rollout_policy"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default="default")
+    mode: Mapped[str] = mapped_column(String(32), nullable=False, default="INVENTORY_ONLY")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
+    )
+
+
 class SyncRun(Base):
     __tablename__ = "sync_run"
 
@@ -373,6 +383,49 @@ class DryRunProposal(Base):
     eligibility_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     evaluated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now, index=True
+    )
+
+
+class DeletionJob(Base):
+    __tablename__ = "deletion_job"
+    __table_args__ = (UniqueConstraint("lifecycle_id", name="uq_deletion_job_lifecycle"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    lifecycle_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("media_lifecycle.id"), nullable=False, index=True
+    )
+    proposal_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    state: Mapped[str] = mapped_column(
+        String(40), nullable=False, default="PENDING_APPROVAL", index=True
+    )
+    current_step: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="AWAITING_APPROVAL"
+    )
+    correlation_id: Mapped[str] = mapped_column(String(36), nullable=False, unique=True, index=True)
+    requested_by_admin_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("admin_user.id"), nullable=False
+    )
+    approved_by_admin_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("admin_user.id")
+    )
+    approval_snapshot: Mapped[dict[str, Any]] = mapped_column(
+        JSON, nullable=False, default=dict
+    )
+    execution_snapshot: Mapped[dict[str, Any]] = mapped_column(
+        JSON, nullable=False, default=dict
+    )
+    external_state: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    failure_code: Mapped[str | None] = mapped_column(String(80))
+    last_error: Mapped[str | None] = mapped_column(Text)
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, index=True
+    )
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
     )
 
 

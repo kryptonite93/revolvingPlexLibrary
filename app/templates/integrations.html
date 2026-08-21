@@ -6,7 +6,7 @@
   <main class="workspace integrations-workspace">
     <header class="page-header">
       <div><h1>Settings</h1><p class="header-support">Configure connections, retention rules, and evidence freshness.</p></div>
-      <span class="status-pill status-neutral"><span aria-hidden="true"></span>INVENTORY ONLY</span>
+      <span class="status-pill status-neutral"><span aria-hidden="true"></span>{{ rollout_policy.mode|replace('_', ' ') }}</span>
     </header>
 
     {% if message %}<div class="notice notice-success" role="status">{{ message }}</div>{% endif %}
@@ -51,7 +51,7 @@
             <label data-policy-field="ratio" {% if tracker_policy and tracker_policy.combination in ('TIME_ONLY', 'NEVER_REMOVE') %}class="policy-field-disabled"{% endif %}>Minimum ratio<input type="number" name="minimum_ratio" min="0.01" max="1000" step="0.01" value="{{ tracker_policy.minimum_ratio if tracker_policy and tracker_policy.minimum_ratio is not none else 1.0 }}" {% if tracker_policy and tracker_policy.combination in ('TIME_ONLY', 'NEVER_REMOVE') %}disabled{% endif %}></label>
             <label data-policy-field="time" {% if tracker_policy and tracker_policy.combination in ('RATIO_ONLY', 'NEVER_REMOVE') %}class="policy-field-disabled"{% endif %}>Minimum seed · days<input type="number" name="minimum_seed_days" min="1" max="3650" step="1" value="{{ (tracker_policy.minimum_seed_seconds / 86400)|round|int if tracker_policy and tracker_policy.minimum_seed_seconds is not none else 10 }}" {% if tracker_policy and tracker_policy.combination in ('RATIO_ONLY', 'NEVER_REMOVE') %}disabled{% endif %}></label>
             <label data-policy-field="grace" {% if tracker_policy and tracker_policy.combination == 'NEVER_REMOVE' %}class="policy-field-disabled"{% endif %}>Grace period · hours<input type="number" name="grace_hours" min="0" max="8760" step="0.5" value="{{ (tracker_policy.grace_period_seconds / 3600)|round(2) if tracker_policy else 12 }}" {% if tracker_policy and tracker_policy.combination == 'NEVER_REMOVE' %}disabled{% endif %}><small>Minimum completed seeding age, even if the ratio is already met.</small></label>
-            <label class="tracker-automation-check{% if tracker_policy and tracker_policy.combination == 'NEVER_REMOVE' %} policy-field-disabled{% endif %}" data-policy-field="automation"><input type="checkbox" name="automatic_deletion_allowed" value="yes" {% if tracker_policy and tracker_policy.automatic_deletion_allowed %}checked{% endif %} {% if tracker_policy and tracker_policy.combination == 'NEVER_REMOVE' %}disabled{% endif %}><span><strong>Permit future automatic cleanup</strong><small>This only satisfies one future safety gate. Inventory Only still prevents every external change.</small></span></label>
+            <label class="tracker-automation-check{% if tracker_policy and tracker_policy.combination == 'NEVER_REMOVE' %} policy-field-disabled{% endif %}" data-policy-field="automation"><input type="checkbox" name="automatic_deletion_allowed" value="yes" {% if tracker_policy and tracker_policy.automatic_deletion_allowed %}checked{% endif %} {% if tracker_policy and tracker_policy.combination == 'NEVER_REMOVE' %}disabled{% endif %}><span><strong>Permit future automatic cleanup</strong><small>This only satisfies the tracker-policy gate. It never approves or starts cleanup by itself.</small></span></label>
             <p class="tracker-policy-mode-note" data-policy-note aria-live="polite">{% if tracker_policy and tracker_policy.combination == 'NEVER_REMOVE' %}Never remove blocks cleanup for this tracker; other policy fields do not apply.{% elif tracker_policy and tracker_policy.combination == 'RATIO_ONLY' %}Seed time is not used; the ratio and grace period must pass.{% elif tracker_policy and tracker_policy.combination == 'TIME_ONLY' %}Ratio is not used; seed time and the grace period must pass.{% else %}Both ratio and seed time are available for this rule.{% endif %}</p>
           </form>
         </article>
@@ -95,6 +95,26 @@
         </form>
       </dialog>
       {% endif %}
+    </section>
+
+    <section class="settings-section rollout-settings" aria-labelledby="rollout-settings-title">
+      <div class="section-heading">
+        <div><h2 id="rollout-settings-title">Rollout mode</h2><p>Advance one safety stage at a time. Automatic execution remains unavailable.</p></div>
+        <span class="status-pill status-neutral"><span aria-hidden="true"></span>{{ rollout_policy.mode|replace('_', ' ') }}</span>
+      </div>
+      <div class="rollout-control">
+        <div class="rollout-track" aria-label="Rollout stages">
+          {% for mode, label in [('INVENTORY_ONLY', 'Inventory only'), ('DRY_RUN', 'Dry run'), ('APPROVAL_REQUIRED', 'Approval required')] %}
+          <span class="rollout-stage{% if rollout_policy.mode == mode %} is-current{% endif %}"><strong>{{ label }}</strong><small>{% if mode == 'INVENTORY_ONLY' %}Inventory and decisions only{% elif mode == 'DRY_RUN' %}Persisted deletion simulations{% else %}One title, one explicit approval{% endif %}</small></span>
+          {% endfor %}
+        </div>
+        <form method="post" action="/settings/rollout-mode" class="inline-form rollout-form">
+          <input type="hidden" name="csrf" value="{{ csrf_token }}">
+          <label>Mode<select name="rollout_mode" aria-describedby="rollout-mode-help"><option value="INVENTORY_ONLY" {% if rollout_policy.mode == 'INVENTORY_ONLY' %}selected{% endif %}>Inventory Only</option><option value="DRY_RUN" {% if rollout_policy.mode == 'DRY_RUN' %}selected{% endif %}>Dry Run</option><option value="APPROVAL_REQUIRED" {% if rollout_policy.mode == 'APPROVAL_REQUIRED' %}selected{% endif %} {% if rollout_policy.mode == 'INVENTORY_ONLY' %}disabled{% endif %}>Approval Required{% if rollout_policy.mode == 'INVENTORY_ONLY' %} · complete Dry Run first{% endif %}</option></select><small id="rollout-mode-help">Move forward one stage at a time. You can return to a safer stage immediately.</small></label>
+          <label class="confirmation-check"><input type="checkbox" name="confirm_rollout" value="yes"><span><strong>Confirm rollout change</strong><small>A more permissive mode only exposes its controls; it never approves a title automatically.</small></span></label>
+          <button class="button button-secondary" type="submit" data-save-button>Apply rollout mode</button>
+        </form>
+      </div>
     </section>
 
     <section class="settings-section" aria-labelledby="retention-settings-title">
@@ -213,7 +233,14 @@
                     <button class="button button-secondary" type="submit">Disable Active Management</button>
                     <small class="gate-note">Disabling stops destructive execution before its next step and invalidates queued approvals.</small>
                   </form>
-                  {% else %}<p class="empty-inline">Unavailable while the global rollout is Inventory Only. A later milestone will expose this control after dry-run validation and explicit owner approval.</p>{% endif %}
+                  {% elif rollout_policy.mode == 'APPROVAL_REQUIRED' %}
+                  <form method="post" action="/integrations/{{ integration.id }}/active-management">
+                    <input type="hidden" name="csrf" value="{{ csrf_token }}">
+                    <label class="confirmation-check"><input type="checkbox" name="confirm_active" value="yes"><span><strong>Confirm Active Management</strong><small>{% if integration.kind == 'QBITTORRENT' %}Approved jobs may remove mapped torrents and their torrent-side data after Radarr succeeds.{% elif integration.kind == 'RADARR' %}Approved jobs may remove a movie and its library files through this Radarr instance.{% else %}Television execution is not available in this rollout.{% endif %}</small></span></label>
+                    <button class="button button-danger" type="submit" {% if integration.kind == 'SONARR' %}disabled aria-describedby="sonarr-management-note-{{ integration.id }}"{% endif %}>Enable Active Management</button>
+                    {% if integration.kind == 'SONARR' %}<small id="sonarr-management-note-{{ integration.id }}" class="gate-note">Sonarr remains read-only while movie approval is tested.</small>{% endif %}
+                  </form>
+                  {% else %}<p class="empty-inline">Available after the global rollout reaches Approval Required.</p>{% endif %}
                 </div>
                 {% endif %}
               </div>

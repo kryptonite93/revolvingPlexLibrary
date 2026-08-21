@@ -118,3 +118,47 @@ def test_qbittorrent_api_key_authenticates_with_bearer_token() -> None:
         client_factory(handler),
     ).test_connection()
     assert result.version == "v5.2.0"
+
+
+def test_qbittorrent_delete_explicitly_removes_downloaded_files() -> None:
+    observed: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed.append(request)
+        return httpx.Response(200)
+
+    QBittorrentAdapter(
+        "http://qbittorrent:8080",
+        {"api_key": "qbt_example"},
+        client_factory(handler),
+    ).delete_torrent("abc123", delete_files=True)
+
+    assert len(observed) == 1
+    request = observed[0]
+    assert request.method == "POST"
+    assert request.url.path == "/api/v2/torrents/delete"
+    assert request.headers["Authorization"] == "Bearer qbt_example"
+    assert request.content == b"hashes=abc123&deleteFiles=true"
+
+
+def test_plex_execution_checks_sessions_then_refreshes_one_library() -> None:
+    paths: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        paths.append(request.url.path)
+        if request.url.path == "/status/sessions":
+            return httpx.Response(
+                200,
+                json={
+                    "MediaContainer": {
+                        "Metadata": [{"ratingKey": "episode", "grandparentRatingKey": "show"}]
+                    }
+                },
+            )
+        return httpx.Response(200, json={"MediaContainer": {}})
+
+    adapter = PlexAdapter("http://plex:32400", "plex-token", client_factory(handler))
+    assert adapter.active_session_rating_keys() == {"episode", "show"}
+    adapter.refresh_library("1")
+
+    assert paths == ["/status/sessions", "/library/sections/1/refresh"]

@@ -32,6 +32,8 @@ def test_migrations_apply_to_empty_database(tmp_path, monkeypatch) -> None:
         "requester_profile",
         "tracker_policy",
         "dry_run_proposal",
+        "rollout_policy",
+        "deletion_job",
         "alembic_version",
     }.issubset(inspector.get_table_names())
     assert "monitored" in {column["name"] for column in inspector.get_columns("media_lifecycle")}

@@ -36,6 +36,33 @@ class PlexAdapter:
             response.raise_for_status()
             return response.json()
 
+    def active_session_rating_keys(self) -> set[str]:
+        payload = self._get("/status/sessions")
+        container = payload.get("MediaContainer", {}) if isinstance(payload, dict) else {}
+        metadata = container.get("Metadata", [])
+        if isinstance(metadata, dict):
+            metadata = [metadata]
+        keys: set[str] = set()
+        for item in metadata if isinstance(metadata, list) else []:
+            if not isinstance(item, dict):
+                continue
+            for field in ("ratingKey", "parentRatingKey", "grandparentRatingKey"):
+                if item.get(field) is not None:
+                    keys.add(str(item[field]))
+        return keys
+
+    def item_present(self, rating_key: str) -> bool:
+        try:
+            self._get(f"/library/metadata/{rating_key}")
+        except httpx.HTTPStatusError as error:
+            if error.response.status_code == 404:
+                return False
+            raise
+        return True
+
+    def refresh_library(self, section_id: str) -> None:
+        self._get(f"/library/sections/{section_id}/refresh")
+
     def test_connection(self) -> ConnectionTestResult:
         payload = self._get("/")
         container = payload.get("MediaContainer", {}) if isinstance(payload, dict) else {}

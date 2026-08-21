@@ -80,3 +80,9 @@ class OverseerrAdapter:
             if len(page) < take:
                 return collected
             skip += take
+
+    def movie(self, tmdb_id: int) -> dict[str, Any]:
+        payload = self._get(f"/movie/{tmdb_id}")
+        if not isinstance(payload, dict):
+            raise ValueError("Overseerr returned invalid movie data")
+        return payload

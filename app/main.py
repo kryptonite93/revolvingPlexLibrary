@@ -19,6 +19,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from app.persistence.database import Database
 from app.persistence.models import (
     AdminUser,
+    DeletionJob,
     DryRunProposal,
     EventRecord,
     IntegrationInstance,
@@ -44,6 +45,16 @@ from app.security.auth import (
     verify_password,
 )
 from app.security.credentials import CredentialCipher
+from app.services.deletion_jobs import (
+    DeletionBlocked,
+    DeletionJobError,
+    approve_movie_job,
+    cancel_movie_job,
+    create_movie_job,
+    execute_movie_job,
+    invalidate_queued_jobs,
+    retry_movie_reconciliation,
+)
 from app.services.dry_run import (
     discovered_tracker_domains,
     evaluate_dry_run,
@@ -71,6 +82,7 @@ from app.services.inventory import (
     sync_integration,
 )
 from app.services.media_workbench import WorkbenchRow, build_workbench_page
+from app.services.rollout import change_rollout_mode, get_rollout_policy
 from app.services.scheduler import inventory_scheduler_loop
 from app.services.sync_coordinator import SyncAlreadyRunning, SyncCoordinator
 from app.settings import Settings
@@ -184,6 +196,7 @@ def _integration_context(session: Session, sync_activity=None) -> dict:
         "policy": get_inventory_policy(session),
         "tracker_domains": tracker_domains,
         "available_tracker_domains": available_tracker_domains,
+        "rollout_policy": get_rollout_policy(session),
     }
 
 
@@ -258,6 +271,14 @@ def _deletion_queue_context(session: Session, requested_state: str = "") -> dict
         count_query = count_query.where(DryRunProposal.state == active_state)
     dry_run_rows = session.execute(rows_query.limit(30)).all()
     filtered_result_count = int(session.scalar(count_query) or 0)
+    deletion_jobs = session.execute(
+        select(DeletionJob, MediaLifecycle, MediaIdentity, IntegrationInstance)
+        .join(MediaLifecycle, MediaLifecycle.id == DeletionJob.lifecycle_id)
+        .join(MediaIdentity, MediaIdentity.id == MediaLifecycle.identity_id)
+        .join(IntegrationInstance, IntegrationInstance.id == MediaLifecycle.integration_id)
+        .order_by(DeletionJob.created_at.desc())
+        .limit(30)
+    ).all()
     return {
         "dry_run_counts": dry_run_counts,
         "dry_run_eligible_bytes": dry_run_eligible_bytes,
@@ -267,6 +288,9 @@ def _deletion_queue_context(session: Session, requested_state: str = "") -> dict
         "active_dry_run_state": active_state,
         "filtered_result_count": filtered_result_count,
         "preview_needs_recalculation": preview_needs_recalculation,
+        "rollout_policy": get_rollout_policy(session),
+        "deletion_jobs": deletion_jobs,
+        "jobs_by_lifecycle": {job.lifecycle_id: job for job, *_rest in deletion_jobs},
     }
 
 
@@ -305,6 +329,25 @@ def _media_redirect(
     return RedirectResponse(
         f"/media?{urlencode(params)}", status_code=status.HTTP_303_SEE_OTHER
     )
+
+
+def _deletion_redirect(
+    *,
+    job_id: str | None = None,
+    message: str | None = None,
+    error: str | None = None,
+    warning: str | None = None,
+):
+    params: dict[str, str] = {}
+    if error:
+        params["error"] = error
+    elif warning:
+        params["warning"] = warning
+    elif message:
+        params["message"] = message
+    path = f"/deletion-jobs/{job_id}" if job_id else "/deletion-queue"
+    query = f"?{urlencode(params)}" if params else ""
+    return RedirectResponse(f"{path}{query}", status_code=status.HTTP_303_SEE_OTHER)
 
 
 def _media_lifecycle_query(
@@ -572,7 +615,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             {
                 "admin": admin,
                 "event_count": event_count,
-                "rollout_mode": "INVENTORY_ONLY",
+                "rollout_mode": get_rollout_policy(session).mode,
             },
         )
 
@@ -600,12 +643,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def deletion_queue_page(
         request: Request,
         message: str | None = None,
+        error: str | None = None,
+        warning: str | None = None,
         state: str = Query(""),
         session: Session = Depends(_session),
     ):
         admin = _require_admin(request, session)
         context = _deletion_queue_context(session, state)
-        context.update({"admin": admin, "message": message})
+        context.update(
+            {"admin": admin, "message": message, "error": error, "warning": warning}
+        )
         return _render(request, "deletion_queue.html", context)
 
     @app.post("/integrations")
@@ -816,6 +863,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 },
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             )
+        related_job = session.scalar(
+            select(DeletionJob)
+            .join(MediaLifecycle, MediaLifecycle.id == DeletionJob.lifecycle_id)
+            .where(MediaLifecycle.integration_id == integration.id)
+        )
+        any_in_flight_job = session.scalar(
+            select(DeletionJob).where(
+                DeletionJob.state.not_in(("COMPLETED", "CANCELLED"))
+            )
+        )
+        if related_job is not None or (
+            integration.kind in {"QBITTORRENT", "PLEX", "OVERSEERR"}
+            and any_in_flight_job is not None
+        ):
+            return _integrations_redirect(
+                error=(
+                    f"{integration.name} is referenced by a deletion audit or active approval "
+                    "and cannot be removed. Disable it instead."
+                )
+            )
         removed_name = integration.name
         append_event(
             session,
@@ -851,6 +918,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         integration.enabled = not integration.enabled
         if not integration.enabled:
             integration.active_management_enabled = False
+            invalidate_queued_jobs(
+                session, reason="INTEGRATION_DISABLED"
+            )
         append_event(
             session,
             event_type="integration.enabled_changed",
@@ -997,6 +1067,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except ValueError as error:
             session.rollback()
             return _integrations_redirect(error=str(error))
+        if current != "MANAGED":
+            invalidate_queued_jobs(session, reason="MANAGEMENT_MODE_REDUCED")
         append_event(
             session,
             event_type="integration.management_mode_changed",
@@ -1013,6 +1085,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def integration_active_management(
         integration_id: str,
         request: Request,
+        confirm_active: str | None = Form(None),
         csrf: str = Form(),
         session: Session = Depends(_session),
     ):
@@ -1023,14 +1096,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
         target = not integration.active_management_enabled
         if target:
-            return _integrations_redirect(
-                error="Active Management is unavailable while rollout mode is Inventory Only."
-            )
+            if get_rollout_policy(session).mode != "APPROVAL_REQUIRED":
+                return _integrations_redirect(
+                    error="Active Management requires the Approval Required rollout mode."
+                )
+            if confirm_active != "yes":
+                return _integrations_redirect(
+                    error="Confirm Active Management before enabling it."
+                )
         try:
             set_active_management(integration, enabled=target)
         except ValueError as error:
             session.rollback()
             return _integrations_redirect(error=str(error))
+        if not target:
+            invalidate_queued_jobs(session, reason="ACTIVE_MANAGEMENT_DISABLED")
         append_event(
             session,
             event_type="integration.active_management_changed",
@@ -1366,6 +1446,49 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         return _media_redirect(message=message, query=filter_query)
 
+    @app.post("/settings/rollout-mode")
+    def settings_rollout_mode_update(
+        request: Request,
+        rollout_mode: str = Form(),
+        confirm_rollout: str | None = Form(None),
+        csrf: str = Form(),
+        session: Session = Depends(_session),
+    ):
+        verify_csrf(request, csrf)
+        admin = _require_admin(request, session)
+        policy = get_rollout_policy(session)
+        try:
+            previous, current = change_rollout_mode(
+                policy,
+                rollout_mode,
+                confirmed=confirm_rollout == "yes",
+            )
+        except ValueError as error:
+            session.rollback()
+            return _integrations_redirect(error=str(error))
+        if current != previous:
+            invalidate_queued_jobs(session, reason="ROLLOUT_MODE_CHANGED")
+        if current != "APPROVAL_REQUIRED":
+            for integration in session.scalars(
+                select(IntegrationInstance).where(
+                    IntegrationInstance.active_management_enabled.is_(True)
+                )
+            ):
+                integration.active_management_enabled = False
+        append_event(
+            session,
+            event_type="rollout.mode_changed",
+            entity_type="rollout_policy",
+            entity_id=policy.id,
+            actor_type="admin",
+            actor_id=admin.id,
+            payload={"previous": previous, "current": current},
+        )
+        session.commit()
+        return _integrations_redirect(
+            message=f"Global rollout is now {current.replace('_', ' ').title()}."
+        )
+
     @app.post("/media/policy")
     @app.post("/settings/policy")
     def settings_policy_update(
@@ -1608,6 +1731,226 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return RedirectResponse(
             f"/deletion-queue?{urlencode(query)}",
             status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    @app.post("/deletion-jobs")
+    def deletion_job_create(
+        request: Request,
+        lifecycle_id: str = Form(),
+        csrf: str = Form(),
+        session: Session = Depends(_session),
+    ):
+        verify_csrf(request, csrf)
+        admin = _require_admin(request, session)
+        try:
+            job = create_movie_job(
+                session,
+                lifecycle_id=lifecycle_id,
+                admin_id=admin.id,
+            )
+        except DeletionJobError as error:
+            session.rollback()
+            return _deletion_redirect(error=str(error))
+        return _deletion_redirect(
+            job_id=job.id,
+            message="Approval case prepared. No external service was changed.",
+        )
+
+    @app.get("/deletion-jobs/{job_id}", response_class=HTMLResponse)
+    def deletion_job_detail(
+        job_id: str,
+        request: Request,
+        message: str | None = None,
+        error: str | None = None,
+        warning: str | None = None,
+        session: Session = Depends(_session),
+    ):
+        admin = _require_admin(request, session)
+        record = session.execute(
+            select(DeletionJob, MediaLifecycle, MediaIdentity, IntegrationInstance)
+            .join(MediaLifecycle, MediaLifecycle.id == DeletionJob.lifecycle_id)
+            .join(MediaIdentity, MediaIdentity.id == MediaLifecycle.identity_id)
+            .join(IntegrationInstance, IntegrationInstance.id == MediaLifecycle.integration_id)
+            .where(DeletionJob.id == job_id)
+        ).one_or_none()
+        if record is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+        job, lifecycle, identity, integration = record
+        events = session.scalars(
+            select(EventRecord)
+            .where(EventRecord.correlation_id == job.correlation_id)
+            .order_by(EventRecord.occurred_at)
+        ).all()
+        return _render(
+            request,
+            "deletion_job.html",
+            {
+                "admin": admin,
+                "job": job,
+                "lifecycle": lifecycle,
+                "identity": identity,
+                "integration": integration,
+                "events": events,
+                "rollout_policy": get_rollout_policy(session),
+                "message": message,
+                "error": error,
+                "warning": warning,
+            },
+        )
+
+    @app.post("/deletion-jobs/{job_id}/approve")
+    def deletion_job_approve(
+        job_id: str,
+        request: Request,
+        confirm_title: str = Form(),
+        csrf: str = Form(),
+        session: Session = Depends(_session),
+    ):
+        verify_csrf(request, csrf)
+        admin = _require_admin(request, session)
+        job = session.get(DeletionJob, job_id)
+        if job is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+        try:
+            approve_movie_job(
+                session,
+                job,
+                admin_id=admin.id,
+                confirmation_title=confirm_title,
+            )
+        except DeletionJobError as error:
+            session.rollback()
+            return _deletion_redirect(job_id=job.id, error=str(error))
+        return _deletion_redirect(
+            job_id=job.id,
+            message="Deletion approved. Nothing has been deleted yet.",
+        )
+
+    @app.post("/deletion-jobs/{job_id}/execute")
+    def deletion_job_execute(
+        job_id: str,
+        request: Request,
+        confirm_phrase: str = Form(),
+        acknowledge: str | None = Form(None),
+        csrf: str = Form(),
+        session: Session = Depends(_session),
+    ):
+        verify_csrf(request, csrf)
+        admin = _require_admin(request, session)
+        job = session.get(DeletionJob, job_id)
+        if job is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+        if acknowledge != "yes":
+            return _deletion_redirect(
+                job_id=job.id,
+                error="Confirm that this action removes the Radarr movie and its library files.",
+            )
+        try:
+            title = session.scalar(
+                select(MediaIdentity.canonical_title)
+                .join(MediaLifecycle, MediaLifecycle.identity_id == MediaIdentity.id)
+                .join(DeletionJob, DeletionJob.lifecycle_id == MediaLifecycle.id)
+                .where(DeletionJob.id == job.id)
+            )
+            with request.app.state.sync_coordinator.acquire(
+                job.id,
+                f"Deletion: {title or 'movie'}",
+                trigger="manual_deletion",
+            ):
+                execute_movie_job(
+                    session,
+                    job,
+                    request.app.state.credential_cipher,
+                    admin_id=admin.id,
+                    confirmation_phrase=confirm_phrase,
+                )
+        except SyncAlreadyRunning:
+            return _deletion_redirect(
+                job_id=job.id,
+                error=(
+                    "Another inventory or deletion operation is already running. "
+                    "Try again after it finishes."
+                ),
+            )
+        except (DeletionJobError, DeletionBlocked) as error:
+            return _deletion_redirect(job_id=job.id, error=str(error))
+        if job.state == "RECONCILE_REQUIRED":
+            return _deletion_redirect(
+                job_id=job.id,
+                warning=(
+                    "Radarr deletion completed, but Plex or Overseerr still needs to converge. "
+                    "Retry reconciliation after their scans finish."
+                ),
+            )
+        return _deletion_redirect(
+            job_id=job.id,
+            message="Approved deletion completed and requestability was confirmed.",
+        )
+
+    @app.post("/deletion-jobs/{job_id}/reconcile")
+    def deletion_job_reconcile(
+        job_id: str,
+        request: Request,
+        csrf: str = Form(),
+        session: Session = Depends(_session),
+    ):
+        verify_csrf(request, csrf)
+        admin = _require_admin(request, session)
+        job = session.get(DeletionJob, job_id)
+        if job is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+        try:
+            with request.app.state.sync_coordinator.acquire(
+                job.id,
+                "Deletion reconciliation",
+                trigger="deletion_reconciliation",
+            ):
+                retry_movie_reconciliation(
+                    session,
+                    job,
+                    request.app.state.credential_cipher,
+                    admin_id=admin.id,
+                )
+        except SyncAlreadyRunning:
+            return _deletion_redirect(
+                job_id=job.id,
+                error=(
+                    "Another inventory or deletion operation is already running. "
+                    "Try again after it finishes."
+                ),
+            )
+        except DeletionJobError as error:
+            return _deletion_redirect(job_id=job.id, error=str(error))
+        if job.state == "RECONCILE_REQUIRED":
+            return _deletion_redirect(
+                job_id=job.id,
+                warning="Plex or Overseerr still reports the movie. Try again after scans finish.",
+            )
+        return _deletion_redirect(
+            job_id=job.id,
+            message="Plex absence and Overseerr requestability confirmed.",
+        )
+
+    @app.post("/deletion-jobs/{job_id}/cancel")
+    def deletion_job_cancel(
+        job_id: str,
+        request: Request,
+        csrf: str = Form(),
+        session: Session = Depends(_session),
+    ):
+        verify_csrf(request, csrf)
+        admin = _require_admin(request, session)
+        job = session.get(DeletionJob, job_id)
+        if job is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+        try:
+            cancel_movie_job(session, job, admin_id=admin.id)
+        except DeletionJobError as error:
+            session.rollback()
+            return _deletion_redirect(job_id=job.id, error=str(error))
+        return _deletion_redirect(
+            job_id=job.id,
+            message="Approval case cancelled. No external service was changed.",
         )
 
     @app.get("/media/{lifecycle_id}", response_class=HTMLResponse)

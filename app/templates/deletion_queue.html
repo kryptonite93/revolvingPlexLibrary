@@ -5,11 +5,32 @@
   {% set active_page = "deletion-queue" %}{% include "_sidebar.html" %}
   <main class="workspace deletion-queue-workspace">
     <header class="page-header">
-      <div><h1>Deletion queue</h1><p class="header-support">Review every retention and torrent-safety decision before active management is available.</p></div>
-      <span class="status-pill status-neutral"><span aria-hidden="true"></span>INVENTORY ONLY</span>
+      <div><h1>Deletion queue</h1><p class="header-support">Review simulations, prepare one movie, and preserve a complete approval trail.</p></div>
+      <span class="status-pill status-neutral"><span aria-hidden="true"></span>{{ rollout_policy.mode|replace('_', ' ') }}</span>
     </header>
 
     {% if message %}<div class="notice notice-success" role="status">{{ message }}</div>{% endif %}
+    {% if warning %}<div class="notice notice-warning" role="status">{{ warning }}</div>{% endif %}
+    {% if error %}<div class="notice notice-error" role="alert">{{ error }}</div>{% endif %}
+
+    <section class="settings-section approval-section" aria-labelledby="approval-title">
+      <div class="section-heading approval-heading">
+        <div><h2 id="approval-title">Manual movie approvals</h2><p>Preparing and approving a case changes only this app. Execution remains a separate title-specific confirmation.</p></div>
+        <a class="button button-secondary compact-action" href="/settings">Review safety gates</a>
+      </div>
+      {% if rollout_policy.mode == 'APPROVAL_REQUIRED' %}
+      <div class="approval-readiness"><strong>Approval Required is active</strong><span>Eligible movies from a Managed Radarr instance can be prepared after Active Management is enabled for that Radarr instance and qBittorrent when a torrent is mapped.</span></div>
+      {% else %}
+      <div class="approval-readiness is-locked"><strong>Manual execution is locked</strong><span>Advance the rollout one stage at a time in Settings. Existing simulations remain read-only.</span></div>
+      {% endif %}
+      {% if deletion_jobs %}
+      <div class="job-list" aria-label="Manual deletion jobs">
+        {% for job, lifecycle, identity, integration in deletion_jobs %}
+        <a class="job-row" href="/deletion-jobs/{{ job.id }}"><span><strong>{{ identity.canonical_title }}</strong><small>{{ integration.name }} · prepared {{ format_datetime(job.created_at) }}</small></span><span class="job-state job-state-{{ job.state|lower|replace('_', '-') }}">{{ job.state|replace('_', ' ')|title }}</span><small>{{ job.current_step|replace('_', ' ')|title }}</small></a>
+        {% endfor %}
+      </div>
+      {% else %}<div class="empty-state compact-empty"><h3>No approval cases yet</h3><p>When you are ready, filter the preview to Eligible and prepare one expendable non-4K Radarr movie.</p></div>{% endif %}
+    </section>
 
     <section class="settings-section dry-run-section" aria-labelledby="dry-run-title">
       <div class="section-heading dry-run-heading">
@@ -35,10 +56,12 @@
       </div>
       <div class="dry-run-list" aria-label="Latest dry-run results">
         {% for proposal, lifecycle, identity, integration in dry_run_rows %}
-        <a class="dry-run-row" href="/media/{{ lifecycle.id }}">
-          <span class="dry-run-title"><strong>{{ identity.canonical_title }}{% if identity.media_type == 'SEASON' %} · {{ 'Specials' if identity.season_number == 0 else 'Season ' ~ identity.season_number }}{% endif %}</strong><small>{{ integration.name }} · {{ ((proposal.estimated_bytes or 0) / 1073741824)|round(2) }} GiB</small></span>
-          <span class="dry-run-reason"><em class="dry-run-state dry-run-{{ proposal.state|lower }}">{% if proposal.state == 'ELIGIBLE' %}Eligible in simulation{% else %}{{ proposal.state|title }}{% endif %}</em><small>{{ proposal.reason_text }}</small><span class="view-evidence">View evidence</span></span>
-        </a>
+        {% set existing_job = jobs_by_lifecycle.get(lifecycle.id) %}
+        <article class="dry-run-row">
+          <a class="dry-run-main" href="/media/{{ lifecycle.id }}"><span class="dry-run-title"><strong>{{ identity.canonical_title }}{% if identity.media_type == 'SEASON' %} · {{ 'Specials' if identity.season_number == 0 else 'Season ' ~ identity.season_number }}{% endif %}</strong><small>{{ integration.name }} · {{ ((proposal.estimated_bytes or 0) / 1073741824)|round(2) }} GiB</small></span><span class="dry-run-reason"><em class="dry-run-state dry-run-{{ proposal.state|lower }}">{% if proposal.state == 'ELIGIBLE' %}Eligible in simulation{% else %}{{ proposal.state|title }}{% endif %}</em><small>{{ proposal.reason_text }}</small><span class="view-evidence">View evidence</span></span></a>
+          {% if existing_job %}<a class="button button-secondary compact-action" href="/deletion-jobs/{{ existing_job.id }}">View approval case</a>
+          {% elif proposal.state == 'ELIGIBLE' and identity.media_type == 'MOVIE' and integration.kind == 'RADARR' and integration.management_mode == 'MANAGED' and integration.active_management_enabled and rollout_policy.mode == 'APPROVAL_REQUIRED' %}<form method="post" action="/deletion-jobs"><input type="hidden" name="csrf" value="{{ csrf_token }}"><input type="hidden" name="lifecycle_id" value="{{ lifecycle.id }}"><button class="button button-secondary compact-action" type="submit">Prepare approval</button></form>{% endif %}
+        </article>
         {% endfor %}
         {% if not dry_run_rows %}<div class="empty-state"><h3>No {{ active_dry_run_state|lower|replace('_', ' ') }} results</h3><p>The latest preview did not produce any items in this state. Choose another summary count or show all results.</p><a class="button button-secondary" href="/deletion-queue">Show all results</a></div>{% endif %}
       </div>
