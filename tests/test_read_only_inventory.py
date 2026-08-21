@@ -11,7 +11,9 @@ from app.integrations.qbittorrent import QBittorrentAdapter
 from app.persistence.models import (
     EventRecord,
     IntegrationInstance,
+    IntegrationLibraryMapping,
     InventoryPolicy,
+    ManagedLibrary,
     MediaFileRevision,
     MediaIdentity,
     MediaLifecycle,
@@ -30,6 +32,7 @@ from app.services.inventory import (
     set_manual_protection,
     sync_integration,
     sync_overseerr,
+    sync_plex,
 )
 from app.services.scheduler import run_due_inventory_syncs
 
@@ -60,6 +63,345 @@ def client_factory(handler):
         return httpx.Client(transport=transport, **kwargs)
 
     return factory
+
+
+def test_plex_sync_does_not_collapse_duplicate_arr_lifecycles(app) -> None:
+    with app.state.database.session_factory() as session:
+        plex = IntegrationInstance(
+            kind="PLEX",
+            name="Plex",
+            base_url="http://plex:32400",
+            enabled=True,
+            credentials_encrypted=app.state.credential_cipher.encrypt({"api_key": "plex"}),
+        )
+        radarr = IntegrationInstance(
+            kind="RADARR",
+            name="Radarr",
+            base_url="http://radarr:7878",
+            enabled=True,
+            credentials_encrypted=app.state.credential_cipher.encrypt({"api_key": "radarr"}),
+        )
+        radarr_4k = IntegrationInstance(
+            kind="RADARR",
+            name="Radarr 4K",
+            base_url="http://radarr-4k:7878",
+            enabled=True,
+            credentials_encrypted=app.state.credential_cipher.encrypt({"api_key": "radarr-4k"}),
+        )
+        policy = InventoryPolicy(id="default")
+        session.add_all([plex, radarr, radarr_4k, policy])
+        session.flush()
+        movies = ManagedLibrary(
+            plex_integration_id=plex.id,
+            external_id="1",
+            name="Movies",
+            media_type="movie",
+            enabled=True,
+        )
+        movies_4k = ManagedLibrary(
+            plex_integration_id=plex.id,
+            external_id="2",
+            name="Movies 4K",
+            media_type="movie",
+            enabled=True,
+        )
+        identity = MediaIdentity(
+            media_type="MOVIE",
+            source_key="tmdb:123",
+            tmdb_id=123,
+            canonical_title="Shared Movie",
+        )
+        session.add_all([movies, movies_4k, identity])
+        session.flush()
+        normal = MediaLifecycle(
+            identity_id=identity.id,
+            integration_id=radarr.id,
+            arr_item_id=10,
+            state="ACTIVE",
+            current_path="/data/movies/Shared.Movie.1080p.mkv",
+        )
+        four_k = MediaLifecycle(
+            identity_id=identity.id,
+            integration_id=radarr_4k.id,
+            arr_item_id=20,
+            state="ACTIVE",
+            current_path="/data-4k/movies/Shared.Movie.2160p.mkv",
+        )
+        session.add_all([normal, four_k])
+        session.flush()
+
+        sync_plex(
+            session,
+            plex,
+            {"api_key": "plex"},
+            policy,
+            library_payloads=[
+                (
+                    movies,
+                    [
+                        {
+                            "ratingKey": "normal-key",
+                            "Guid": [{"id": "tmdb://123"}],
+                            "Media": [{"Part": [{"file": "/plex/movies/Shared.Movie.1080p.mkv"}]}],
+                        }
+                    ],
+                ),
+                (
+                    movies_4k,
+                    [
+                        {
+                            "ratingKey": "4k-key",
+                            "Guid": [{"id": "tmdb://123"}],
+                            "Media": [
+                                {"Part": [{"file": "/plex/movies-4k/Shared.Movie.2160p.mkv"}]}
+                            ],
+                        }
+                    ],
+                ),
+            ],
+        )
+
+        assert {normal.plex_rating_key, four_k.plex_rating_key} == {"normal-key", "4k-key"}
+        assert {normal.library_id, four_k.library_id} == {movies.id, movies_4k.id}
+        mappings = session.scalars(select(IntegrationLibraryMapping)).all()
+        assert {
+            (mapping.integration_id, mapping.library_id, mapping.source)
+            for mapping in mappings
+        } == {
+            (radarr.id, movies.id, "AUTO"),
+            (radarr_4k.id, movies_4k.id, "AUTO"),
+        }
+
+
+def test_plex_sync_requires_filename_evidence_before_automatic_pairing(app) -> None:
+    with app.state.database.session_factory() as session:
+        plex = IntegrationInstance(
+            kind="PLEX",
+            name="Plex",
+            base_url="http://plex:32400",
+            enabled=True,
+            credentials_encrypted=app.state.credential_cipher.encrypt({"api_key": "plex"}),
+        )
+        radarr = IntegrationInstance(
+            kind="RADARR",
+            name="Radarr",
+            base_url="http://radarr:7878",
+            enabled=True,
+            credentials_encrypted=app.state.credential_cipher.encrypt({"api_key": "radarr"}),
+        )
+        policy = InventoryPolicy(id="default")
+        session.add_all([plex, radarr, policy])
+        session.flush()
+        movies = ManagedLibrary(
+            plex_integration_id=plex.id,
+            external_id="1",
+            name="Movies",
+            media_type="movie",
+            enabled=True,
+        )
+        identity = MediaIdentity(
+            media_type="MOVIE",
+            source_key="tmdb:123",
+            tmdb_id=123,
+            canonical_title="Shared Movie",
+        )
+        session.add_all([movies, identity])
+        session.flush()
+        lifecycle = MediaLifecycle(
+            identity_id=identity.id,
+            integration_id=radarr.id,
+            arr_item_id=10,
+            state="ACTIVE",
+            current_path="/data/movies/Expected.Release.mkv",
+        )
+        session.add(lifecycle)
+        session.flush()
+
+        sync_plex(
+            session,
+            plex,
+            {"api_key": "plex"},
+            policy,
+            library_payloads=[
+                (
+                    movies,
+                    [
+                        {
+                            "ratingKey": "wrong-key",
+                            "Guid": [{"id": "tmdb://123"}],
+                            "Media": [{"Part": [{"file": "/plex/Other.Release.mkv"}]}],
+                        }
+                    ],
+                )
+            ],
+        )
+
+        assert session.get(IntegrationLibraryMapping, radarr.id) is None
+        assert lifecycle.library_id is None
+        assert lifecycle.plex_rating_key is None
+
+
+def test_automatic_pairing_can_reassign_a_library_without_unique_constraint_failure(
+    app,
+) -> None:
+    with app.state.database.session_factory() as session:
+        plex = IntegrationInstance(
+            kind="PLEX",
+            name="Plex",
+            base_url="http://plex:32400",
+            enabled=True,
+            credentials_encrypted=app.state.credential_cipher.encrypt({"api_key": "plex"}),
+        )
+        radarr_a = IntegrationInstance(
+            kind="RADARR",
+            name="Radarr A",
+            base_url="http://radarr-a:7878",
+            enabled=True,
+            credentials_encrypted=app.state.credential_cipher.encrypt({"api_key": "a"}),
+        )
+        radarr_b = IntegrationInstance(
+            kind="RADARR",
+            name="Radarr B",
+            base_url="http://radarr-b:7878",
+            enabled=True,
+            credentials_encrypted=app.state.credential_cipher.encrypt({"api_key": "b"}),
+        )
+        policy = InventoryPolicy(id="default")
+        session.add_all([plex, radarr_a, radarr_b, policy])
+        session.flush()
+        movies = ManagedLibrary(
+            plex_integration_id=plex.id,
+            external_id="1",
+            name="Movies",
+            media_type="movie",
+            enabled=True,
+        )
+        identity = MediaIdentity(
+            media_type="MOVIE",
+            source_key="tmdb:123",
+            tmdb_id=123,
+            canonical_title="Shared Movie",
+        )
+        session.add_all([movies, identity])
+        session.flush()
+        session.add_all(
+            [
+                IntegrationLibraryMapping(
+                    integration_id=radarr_a.id,
+                    library_id=movies.id,
+                    source="AUTO",
+                ),
+                MediaLifecycle(
+                    identity_id=identity.id,
+                    integration_id=radarr_a.id,
+                    arr_item_id=10,
+                    state="ACTIVE",
+                    current_path="/data/A.Release.mkv",
+                ),
+                MediaLifecycle(
+                    identity_id=identity.id,
+                    integration_id=radarr_b.id,
+                    arr_item_id=20,
+                    state="ACTIVE",
+                    current_path="/data/B.Release.mkv",
+                ),
+            ]
+        )
+        session.flush()
+
+        sync_plex(
+            session,
+            plex,
+            {"api_key": "plex"},
+            policy,
+            library_payloads=[
+                (
+                    movies,
+                    [
+                        {
+                            "ratingKey": "b-key",
+                            "Guid": [{"id": "tmdb://123"}],
+                            "Media": [{"Part": [{"file": "/plex/B.Release.mkv"}]}],
+                        }
+                    ],
+                )
+            ],
+        )
+
+        assert session.get(IntegrationLibraryMapping, radarr_a.id) is None
+        mapping = session.get(IntegrationLibraryMapping, radarr_b.id)
+        assert mapping is not None
+        assert mapping.library_id == movies.id
+        assert mapping.source == "AUTO"
+
+
+def test_empty_plex_sync_preserves_validated_auto_pairing_after_deletion(app) -> None:
+    with app.state.database.session_factory() as session:
+        plex = IntegrationInstance(
+            kind="PLEX",
+            name="Plex",
+            base_url="http://plex:32400",
+            enabled=True,
+            credentials_encrypted=app.state.credential_cipher.encrypt({"api_key": "plex"}),
+        )
+        radarr = IntegrationInstance(
+            kind="RADARR",
+            name="Radarr",
+            base_url="http://radarr:7878",
+            enabled=True,
+            credentials_encrypted=app.state.credential_cipher.encrypt({"api_key": "radarr"}),
+        )
+        policy = InventoryPolicy(id="default")
+        session.add_all([plex, radarr, policy])
+        session.flush()
+        movies = ManagedLibrary(
+            plex_integration_id=plex.id,
+            external_id="1",
+            name="Movies",
+            media_type="movie",
+            enabled=True,
+        )
+        identity = MediaIdentity(
+            media_type="MOVIE",
+            source_key="tmdb:123",
+            tmdb_id=123,
+            canonical_title="Deleted Movie",
+        )
+        session.add_all([movies, identity])
+        session.flush()
+        lifecycle = MediaLifecycle(
+            identity_id=identity.id,
+            integration_id=radarr.id,
+            arr_item_id=10,
+            state="DELETED",
+            current_path="/data/Deleted.Movie.mkv",
+        )
+        session.add_all(
+            [
+                lifecycle,
+                IntegrationLibraryMapping(
+                    integration_id=radarr.id,
+                    library_id=movies.id,
+                    source="AUTO",
+                ),
+            ]
+        )
+        session.flush()
+
+        sync_plex(
+            session,
+            plex,
+            {"api_key": "plex"},
+            policy,
+            library_payloads=[(movies, [])],
+        )
+
+        mapping = session.get(IntegrationLibraryMapping, radarr.id)
+        assert mapping is not None
+        assert mapping.library_id == movies.id
+        assert mapping.source == "AUTO"
+        assert lifecycle.library_id == movies.id
+        assert lifecycle.plex_rating_key is None
 
 
 def test_retention_and_meaningful_playback_rules() -> None:

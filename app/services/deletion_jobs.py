@@ -17,6 +17,7 @@ from app.persistence.models import (
     DeletionJob,
     DryRunProposal,
     IntegrationInstance,
+    IntegrationLibraryMapping,
     ManagedLibrary,
     MediaIdentity,
     MediaLifecycle,
@@ -405,9 +406,18 @@ def _live_revalidate(
     plex = _enabled_integration(session, "PLEX")
     tautulli = _enabled_integration(session, "TAUTULLI")
     overseerr = _enabled_integration(session, "OVERSEERR")
-    library = session.get(ManagedLibrary, lifecycle.library_id) if lifecycle.library_id else None
+    library_mapping = session.get(IntegrationLibraryMapping, integration.id)
+    if library_mapping is None:
+        raise DeletionBlocked(
+            f"Pair {integration.name} with its Plex library in Settings, then sync Plex."
+        )
+    library = session.get(ManagedLibrary, library_mapping.library_id)
     if library is None or not library.enabled or library.plex_integration_id != plex.id:
-        raise DeletionBlocked("The movie is not mapped to an enabled Plex library.")
+        raise DeletionBlocked("The paired Plex library is disabled or unavailable.")
+    if lifecycle.library_id != library.id:
+        raise DeletionBlocked(
+            f"Synchronize Plex after pairing {integration.name} with {library.name}."
+        )
 
     mapping_rows = session.execute(
         select(TorrentMediaMapping, Torrent, IntegrationInstance)
@@ -658,9 +668,20 @@ def _refresh_and_reconcile(
 ) -> None:
     _ensure_capability_gates(session, job)
     _ensure_radarr_import_exclusion(session, job, cipher)
-    lifecycle, identity, _integration, _proposal = _job_record(session, job)
-    plex_snapshot = dict(job.execution_snapshot.get("plex", {}))
-    plex = session.get(IntegrationInstance, str(plex_snapshot.get("integration_id")))
+    lifecycle, identity, integration, _proposal = _job_record(session, job)
+    library_mapping = session.get(IntegrationLibraryMapping, integration.id)
+    if library_mapping is None:
+        raise DeletionBlocked(
+            f"Pair {integration.name} with its Plex library in Settings, then sync Plex."
+        )
+    library = session.get(ManagedLibrary, library_mapping.library_id)
+    if library is None or not library.enabled:
+        raise DeletionBlocked("The paired Plex library is disabled or unavailable.")
+    if lifecycle.library_id != library.id:
+        raise DeletionBlocked(
+            f"Synchronize Plex after pairing {integration.name} with {library.name}."
+        )
+    plex = session.get(IntegrationInstance, library.plex_integration_id)
     if plex is None or not plex.enabled:
         raise DeletionBlocked("Plex is disabled or unavailable.")
     plex_adapter = PlexAdapter(
@@ -669,7 +690,7 @@ def _refresh_and_reconcile(
     )
     if job.state not in {"PLEX_REFRESH_REQUESTED", "PLEX_REFRESHED", "RECONCILE_REQUIRED"}:
         _transition(session, job, "PLEX_REFRESH_REQUESTED", "CALLING_PLEX_REFRESH")
-    plex_adapter.refresh_library(str(plex_snapshot["section_id"]))
+    plex_adapter.refresh_library(library.external_id)
     external_state = dict(job.external_state)
     external_state["plex_refresh_sent"] = True
     rating_key = lifecycle.plex_rating_key
@@ -677,40 +698,46 @@ def _refresh_and_reconcile(
         rating_key and plex_adapter.item_present(rating_key)
     )
     job.external_state = external_state
-    _transition(session, job, "PLEX_REFRESHED", "VERIFYING_REQUESTABILITY")
+    _transition(session, job, "PLEX_REFRESHED", "RECORDING_OVERSEERR_STATUS")
 
-    overseerr = _enabled_integration(session, "OVERSEERR")
-    requestable = False
+    requestable: bool | None = None
     media_status: int | None = None
-    if identity.tmdb_id:
-        payload = OverseerrAdapter(
-            overseerr.base_url,
-            cipher.decrypt(overseerr.credentials_encrypted)["api_key"],
-        ).movie(identity.tmdb_id)
-        media_info = payload.get("mediaInfo")
-        if isinstance(media_info, dict) and media_info.get("status") is not None:
-            media_status = int(media_info["status"])
-        requestable = media_info is None or media_status in {None, 1}
+    observation_error: str | None = None
+    try:
+        overseerr = _enabled_integration(session, "OVERSEERR")
+        if identity.tmdb_id:
+            payload = OverseerrAdapter(
+                overseerr.base_url,
+                cipher.decrypt(overseerr.credentials_encrypted)["api_key"],
+            ).movie(identity.tmdb_id)
+            media_info = payload.get("mediaInfo")
+            if isinstance(media_info, dict) and media_info.get("status") is not None:
+                media_status = int(media_info["status"])
+            requestable = media_info is None or media_status in {None, 1}
+    except (DeletionBlocked, httpx.HTTPError, ValueError, KeyError, TypeError) as error:
+        observation_error = str(redact(str(error)))[:1000]
     external_state = dict(job.external_state)
     external_state["overseerr_requestable"] = requestable
     external_state["overseerr_media_status"] = media_status
+    external_state["overseerr_observation_error"] = observation_error
     job.external_state = external_state
-    if external_state.get("plex_item_present") or not requestable:
+    if external_state.get("plex_item_present"):
         job.completed_at = None
         _transition(
             session,
             job,
             "RECONCILE_REQUIRED",
-            "WAITING_FOR_PLEX_AND_OVERSEERR",
+            "WAITING_FOR_PAIRED_PLEX_LIBRARY",
             payload={
                 "plex_item_present": bool(external_state.get("plex_item_present")),
                 "overseerr_requestable": requestable,
                 "overseerr_media_status": media_status,
+                "overseerr_observation_error": observation_error,
             },
         )
         return
     job.completed_at = utc_now()
-    _transition(session, job, "COMPLETED", "REQUESTABILITY_CONFIRMED")
+    _transition(session, job, "COMPLETED", "PAIRED_LIBRARY_ABSENCE_CONFIRMED")
 
 
 def execute_movie_job(

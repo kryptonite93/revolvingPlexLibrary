@@ -7,7 +7,13 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from app.integrations.base import ConnectionTestResult
-from app.persistence.models import EventRecord, IntegrationInstance, ManagedLibrary, SourceFreshness
+from app.persistence.models import (
+    EventRecord,
+    IntegrationInstance,
+    IntegrationLibraryMapping,
+    ManagedLibrary,
+    SourceFreshness,
+)
 
 
 def csrf_from(response) -> str:
@@ -377,6 +383,63 @@ def test_plex_library_selection_requires_enabled_plex(client: TestClient, app) -
     page = client.get("/integrations")
     assert "Remove from scope" in page.text
     assert "never deletes content from Plex" in page.text
+
+
+def test_arr_instance_can_be_paired_with_a_specific_plex_library(
+    client: TestClient, app
+) -> None:
+    authenticate(client)
+    with app.state.database.session_factory() as session:
+        plex = IntegrationInstance(
+            kind="PLEX",
+            name="Plex",
+            base_url="http://plex:32400",
+            enabled=True,
+            credentials_encrypted=app.state.credential_cipher.encrypt({"api_key": "plex"}),
+        )
+        radarr = IntegrationInstance(
+            kind="RADARR",
+            name="Radarr",
+            base_url="http://radarr:7878",
+            enabled=True,
+            management_mode="MANAGED",
+            credentials_encrypted=app.state.credential_cipher.encrypt({"api_key": "radarr"}),
+        )
+        session.add_all([plex, radarr])
+        session.flush()
+        movies = ManagedLibrary(
+            plex_integration_id=plex.id,
+            external_id="1",
+            name="Movies",
+            media_type="movie",
+            enabled=True,
+        )
+        movies_4k = ManagedLibrary(
+            plex_integration_id=plex.id,
+            external_id="2",
+            name="Movies 4K",
+            media_type="movie",
+            enabled=True,
+        )
+        session.add_all([movies, movies_4k])
+        session.commit()
+        radarr_id = radarr.id
+        movies_id = movies.id
+
+    page = client.get("/settings")
+    assert "Plex library pairing" in page.text
+    response = client.post(
+        f"/integrations/{radarr_id}/plex-library",
+        data={"library_id": movies_id, "csrf": csrf_from(page)},
+        follow_redirects=True,
+    )
+    assert "Radarr is paired with Movies" in response.text
+    assert "Manually paired; automatic detection will not override this choice" in response.text
+    with app.state.database.session_factory() as session:
+        mapping = session.get(IntegrationLibraryMapping, radarr_id)
+        assert mapping is not None
+        assert mapping.library_id == movies_id
+        assert mapping.source == "MANUAL"
 
 
 def test_active_management_route_is_blocked_in_inventory_only(client: TestClient, app) -> None:

@@ -23,6 +23,7 @@ from app.persistence.models import (
     DryRunProposal,
     EventRecord,
     IntegrationInstance,
+    IntegrationLibraryMapping,
     ManagedLibrary,
     MediaFileRevision,
     MediaIdentity,
@@ -69,6 +70,7 @@ from app.services.integrations import (
     discover_plex_libraries,
     remove_integration_local_data,
     set_active_management,
+    set_plex_library_mapping,
     test_integration,
     update_integration,
 )
@@ -157,6 +159,20 @@ def _integration_context(session: Session, sync_activity=None) -> dict:
     libraries_by_plex: dict[str, list[ManagedLibrary]] = {}
     for library in libraries:
         libraries_by_plex.setdefault(library.plex_integration_id, []).append(library)
+    library_mappings = {
+        mapping.integration_id: mapping
+        for mapping in session.scalars(select(IntegrationLibraryMapping)).all()
+    }
+    enabled_libraries_by_arr: dict[str, list[ManagedLibrary]] = {}
+    for integration in integrations:
+        if integration.kind not in ("RADARR", "SONARR"):
+            continue
+        required_type = "movie" if integration.kind == "RADARR" else "show"
+        enabled_libraries_by_arr[integration.id] = [
+            library
+            for library in libraries
+            if library.enabled and library.media_type == required_type
+        ]
     freshness_by_integration = {
         row.integration_id: row for row in session.scalars(select(SourceFreshness)).all()
     }
@@ -189,6 +205,8 @@ def _integration_context(session: Session, sync_activity=None) -> dict:
     return {
         "integrations": integrations,
         "libraries_by_plex": libraries_by_plex,
+        "library_mappings": library_mappings,
+        "enabled_libraries_by_arr": enabled_libraries_by_arr,
         "freshness_by_integration": freshness_by_integration,
         "requesters_by_integration": requesters_by_integration,
         "sync_activity": sync_activity,
@@ -1026,6 +1044,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if plex is None or not plex.enabled:
             return _integrations_redirect(error="Enable Plex before selecting libraries.")
         library.enabled = not library.enabled
+        if not library.enabled:
+            mapping = session.scalar(
+                select(IntegrationLibraryMapping).where(
+                    IntegrationLibraryMapping.library_id == library.id
+                )
+            )
+            if mapping is not None:
+                for lifecycle in session.scalars(
+                    select(MediaLifecycle).where(
+                        MediaLifecycle.integration_id == mapping.integration_id
+                    )
+                ).all():
+                    lifecycle.library_id = None
+                    lifecycle.plex_rating_key = None
+                session.delete(mapping)
         append_event(
             session,
             event_type="plex.library_selection_changed",
@@ -1042,6 +1075,52 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         session.commit()
         return _integrations_redirect(
             message=f"{library.name} {'selected' if library.enabled else 'removed from scope'}."
+        )
+
+    @app.post("/integrations/{integration_id}/plex-library")
+    def integration_plex_library(
+        integration_id: str,
+        request: Request,
+        library_id: str = Form(""),
+        csrf: str = Form(),
+        session: Session = Depends(_session),
+    ):
+        verify_csrf(request, csrf)
+        admin = _require_admin(request, session)
+        integration = session.get(IntegrationInstance, integration_id)
+        if integration is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+        try:
+            mapping = set_plex_library_mapping(
+                session,
+                integration,
+                library_id.strip() or None,
+            )
+        except ValueError as error:
+            session.rollback()
+            return _integrations_redirect(error=str(error))
+        append_event(
+            session,
+            event_type="integration.plex_library_mapping_changed",
+            entity_type="integration",
+            entity_id=integration.id,
+            actor_type="admin",
+            actor_id=admin.id,
+            payload={
+                "library_id": mapping.library_id if mapping else None,
+                "source": mapping.source if mapping else "AUTO_PENDING",
+            },
+        )
+        session.commit()
+        if mapping is None:
+            return _integrations_redirect(
+                message=(
+                    f"{integration.name} will detect its Plex library during the next Plex sync."
+                )
+            )
+        library = session.get(ManagedLibrary, mapping.library_id)
+        return _integrations_redirect(
+            message=f"{integration.name} is paired with {library.name if library else 'Plex'}."
         )
 
     @app.post("/integrations/{integration_id}/management-mode")

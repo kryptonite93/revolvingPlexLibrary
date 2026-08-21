@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-08-21T21:10:21Z",
+  "generatedAt": "2026-08-21T22:28:42Z",
   "title": "Design System: Revolving Plex Manager",
   "extensions": {
     "colorMeta": {
@@ -86,6 +86,13 @@
       "description": "The signature media-forward service identity and explicit state pattern.",
       "html": "<article class=\"ds-integration-row\"><div class=\"ds-service-tile\" aria-hidden=\"true\">P</div><div class=\"ds-service-copy\"><strong>Living room Plex</strong><span>Plex · http://192.168.1.20:32400</span></div><div class=\"ds-state\"><span></span>Enabled read-only</div></article>",
       "css": ".ds-integration-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 1rem; align-items: center; padding: 1.35rem 0; border-bottom: 1px solid var(--border); color: var(--ink); font-family: \"Segoe UI Variable\", Aptos, ui-sans-serif, system-ui, sans-serif; } .ds-service-tile { width: 3rem; aspect-ratio: 2 / 3; display: grid; place-items: center; border-radius: var(--radius-sm); background: oklch(0.43 0.12 78); color: var(--ink); font-weight: 800; box-shadow: 0 0.7rem 1.4rem oklch(0 0 0 / 0.25); } .ds-service-copy { min-width: 0; display: grid; gap: 0.3rem; } .ds-service-copy span { overflow: hidden; color: var(--muted); font-size: 0.84rem; text-overflow: ellipsis; white-space: nowrap; } .ds-state { color: oklch(0.82 0.11 150); font-size: 0.75rem; font-weight: 700; } .ds-state > span { display: inline-block; width: 0.45rem; height: 0.45rem; margin-right: 0.45rem; border-radius: 50%; background: oklch(0.7 0.145 150); } .ds-integration-row:focus-within { outline: 3px solid var(--focus); outline-offset: 3px; }"
+    },
+    {
+      "name": "Arr–Plex Library Pairing",
+      "kind": "custom",
+      "description": "A compact pairing control whose helper copy distinguishes automatic exact-filename detection, authoritative manual selection, and fail-closed pending evidence.",
+      "html": "<section class=\"ds-library-pairing\" aria-label=\"Arr to Plex library pairing states\"><header><h3>Plex library pairing</h3><p>Automatic detection compares exact filenames across both services. Choose a library only when the match is ambiguous.</p></header><div class=\"ds-pairing-state\"><label>Library<select><option selected>Detect automatically</option><option>Movies · Plex section 1</option></select></label><small><strong>Auto</strong> Detected automatically from matching filenames.</small><button type=\"button\">Save Plex pairing</button></div><div class=\"ds-pairing-state\"><label>Library<select><option>Detect automatically</option><option selected>Movies 4K · Plex section 2</option></select></label><small><strong>Manual</strong> Manually paired; automatic detection will not override this choice.</small><button type=\"button\">Save Plex pairing</button></div><div class=\"ds-pairing-state ds-pairing-pending\"><label>Library<select><option selected>Detect automatically</option></select></label><small><strong>Pending</strong> Not paired yet. Sync Plex to try automatic detection; deletion stays blocked until the pairing is synchronized.</small><button type=\"button\">Save Plex pairing</button></div></section>",
+      "css": ".ds-library-pairing { display: grid; gap: 0; border-top: 1px solid var(--border); color: var(--ink); font-family: \"Segoe UI Variable\", Aptos, ui-sans-serif, system-ui, sans-serif; } .ds-library-pairing > header { display: grid; grid-template-columns: minmax(10rem, 0.45fr) minmax(18rem, 1fr); gap: 1rem; padding: 1rem 0; border-bottom: 1px solid var(--border); } .ds-library-pairing h3, .ds-library-pairing p { margin: 0; } .ds-library-pairing h3 { font-size: 0.9rem; } .ds-library-pairing p, .ds-pairing-state small { color: var(--muted); font-size: 0.72rem; line-height: 1.45; } .ds-pairing-state { display: grid; grid-template-columns: minmax(16rem, 0.8fr) minmax(18rem, 1fr) auto; gap: 1rem; align-items: end; padding: 0.9rem 0; border-bottom: 1px solid var(--border); } .ds-pairing-state label { display: grid; gap: 0.4rem; color: var(--muted); font-size: 0.72rem; font-weight: 720; } .ds-pairing-state select { width: 100%; min-height: 2.65rem; padding: 0.62rem 0.7rem; border: 1px solid var(--control-border); border-radius: var(--radius-sm); background: var(--bg); color: var(--ink); } .ds-pairing-state small { align-self: center; } .ds-pairing-state small strong { display: block; color: var(--ink); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.04em; } .ds-pairing-pending small strong { color: var(--primary); } .ds-pairing-state button { min-height: 2.65rem; padding: 0.62rem 0.8rem; border: 1px solid var(--control-border); border-radius: var(--radius-sm); background: var(--raised); color: var(--ink); font-weight: 720; cursor: pointer; transition: background-color 180ms ease-out, border-color 180ms ease-out, transform 180ms ease-out; } .ds-pairing-state button:hover { border-color: var(--ink); background: oklch(0.24 0.014 260); } .ds-pairing-state button:active { transform: translateY(1px); } .ds-pairing-state select:focus-visible, .ds-pairing-state button:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; } @media (max-width: 700px) { .ds-library-pairing > header, .ds-pairing-state { grid-template-columns: 1fr; } .ds-pairing-state button { width: 100%; } }"
     },
     {
       "name": "Source Freshness Cue",
@@ -177,6 +184,7 @@
       "Do use poster-like media geometry to establish context without obscuring URLs, health, or controls.",
       "Do order lifecycle evidence from source freshness through import, watch, retention, protection, and torrent mapping before future action.",
       "Do treat each media title as a traceable case file with explicit unknown, stale, blocked, and empty states.",
+      "Do state whether each Arr-to-Plex pairing was detected automatically, set manually, or is still pending, with the next safe step beside the control.",
       "Do keep preparation, the single destructive confirmation, resume, and reconciliation as explicitly named title-scoped states with a persistent correlation identifier and immutable checkpoint trail.",
       "Do preserve visible labels, local validation, keyboard focus, and reduced-motion behavior."
     ],
@@ -185,6 +193,7 @@
       "Don't make destructive controls look equivalent to routine connection or read-only actions.",
       "Don't turn repeated service records into a generic grid of floating cards.",
       "Don't collapse lifecycle evidence into a poster grid, a single opaque score, or a color-only verdict.",
+      "Don't infer an Arr-to-Plex pairing from titles, identifiers, or folder similarity, or allow ambiguous and unsynchronized pairing evidence to reach deletion.",
       "Don't add a typed title, `DELETE` phrase, or separate approval action to manual movie deletion; the title-specific checkbox is the explicit gate.",
       "Don't let resume or reconciliation obscure completed checkpoints or delete another media item or torrent.",
       "Don't use ornamental glass, decorative page-load choreography, or graph-heavy console styling.",

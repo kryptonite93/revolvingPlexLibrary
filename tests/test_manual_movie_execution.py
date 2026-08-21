@@ -12,6 +12,7 @@ from app.persistence.models import (
     DeletionJob,
     DryRunProposal,
     IntegrationInstance,
+    IntegrationLibraryMapping,
     ManagedLibrary,
     MediaIdentity,
     MediaLifecycle,
@@ -32,6 +33,7 @@ from app.services.deletion_jobs import (
     execute_movie_job,
     retry_movie_reconciliation,
 )
+from app.services.inventory import get_inventory_policy, sync_plex
 
 
 def seed_movie_case(app):
@@ -112,6 +114,13 @@ def seed_movie_case(app):
         )
         session.add_all([library, identity])
         session.flush()
+        session.add(
+            IntegrationLibraryMapping(
+                integration_id=radarr.id,
+                library_id=library.id,
+                source="MANUAL",
+            )
+        )
         lifecycle = MediaLifecycle(
             identity_id=identity.id,
             integration_id=radarr.id,
@@ -273,6 +282,7 @@ def install_fake_adapters(
 
     class FakePlex:
         present = plex_present
+        refreshed_sections: list[str] = []
 
         def __init__(self, *_args, **_kwargs):
             pass
@@ -282,7 +292,7 @@ def install_fake_adapters(
             return {"plex-42"} if plex_active else set()
 
         def refresh_library(self, section_id):
-            assert section_id == "1"
+            self.__class__.refreshed_sections.append(section_id)
             calls.append("plex-refresh")
 
         def item_present(self, _rating_key):
@@ -474,7 +484,7 @@ def test_movie_without_current_torrent_skips_qbittorrent_delete(app, monkeypatch
             admin_id=case["admin_id"],
         )
         assert job.state == "COMPLETED"
-        assert job.current_step == "REQUESTABILITY_CONFIRMED"
+        assert job.current_step == "PAIRED_LIBRARY_ABSENCE_CONFIRMED"
 
     assert "radarr-delete" in calls
     assert "qbit-delete" not in calls
@@ -511,6 +521,137 @@ def test_reconciliation_can_finish_after_plex_scan_converges(app, monkeypatch) -
         assert job.state == "COMPLETED"
 
     assert "radarr-exclusion" in _calls
+
+
+def test_overseerr_aggregate_availability_does_not_block_paired_library_completion(
+    app, monkeypatch
+) -> None:
+    case = seed_movie_case(app)
+    _calls, _arr, _qbit, _plex, overseerr = install_fake_adapters(monkeypatch)
+    overseerr.requestable = False
+    job_id = prepare_and_approve(app, case)
+
+    with app.state.database.session_factory() as session:
+        job = session.get(DeletionJob, job_id)
+        assert job is not None
+        execute_movie_job(
+            session,
+            job,
+            app.state.credential_cipher,
+            admin_id=case["admin_id"],
+        )
+        assert job.state == "COMPLETED"
+        assert job.external_state["plex_item_present"] is False
+        assert job.external_state["overseerr_requestable"] is False
+
+
+def test_reconciliation_uses_current_arr_plex_pairing_instead_of_old_snapshot(
+    app, monkeypatch
+) -> None:
+    case = seed_movie_case(app)
+    _calls, _arr, _qbit, plex_adapter, _overseerr = install_fake_adapters(
+        monkeypatch, plex_present=True
+    )
+    job_id = prepare_and_approve(app, case)
+    with app.state.database.session_factory() as session:
+        job = session.get(DeletionJob, job_id)
+        assert job is not None
+        execute_movie_job(
+            session,
+            job,
+            app.state.credential_cipher,
+            admin_id=case["admin_id"],
+        )
+        assert job.state == "RECONCILE_REQUIRED"
+        assert job.execution_snapshot["plex"]["section_id"] == "1"
+
+        radarr = session.scalar(
+            select(IntegrationInstance).where(IntegrationInstance.kind == "RADARR")
+        )
+        plex = session.scalar(
+            select(IntegrationInstance).where(IntegrationInstance.kind == "PLEX")
+        )
+        lifecycle = session.get(MediaLifecycle, case["lifecycle_id"])
+        assert radarr is not None and plex is not None and lifecycle is not None
+        correct_library = ManagedLibrary(
+            plex_integration_id=plex.id,
+            external_id="2",
+            name="Correct Movies",
+            media_type="movie",
+            enabled=True,
+        )
+        session.add(correct_library)
+        session.flush()
+        mapping = session.get(IntegrationLibraryMapping, radarr.id)
+        assert mapping is not None
+        mapping.library_id = correct_library.id
+        mapping.source = "MANUAL"
+        sync_plex(
+            session,
+            plex,
+            {"api_key": "plex"},
+            get_inventory_policy(session),
+            library_payloads=[(correct_library, [])],
+        )
+        assert lifecycle.library_id == correct_library.id
+        assert lifecycle.plex_rating_key is None
+        session.commit()
+
+    plex_adapter.present = False
+    plex_adapter.refreshed_sections = []
+    with app.state.database.session_factory() as session:
+        job = session.get(DeletionJob, job_id)
+        assert job is not None
+        retry_movie_reconciliation(
+            session,
+            job,
+            app.state.credential_cipher,
+            admin_id=case["admin_id"],
+        )
+        assert job.state == "COMPLETED"
+
+    assert plex_adapter.refreshed_sections == ["2"]
+
+
+def test_unavailable_overseerr_is_recorded_but_does_not_block_post_delete_reconciliation(
+    app, monkeypatch
+) -> None:
+    case = seed_movie_case(app)
+    _calls, _arr, _qbit, plex, _overseerr = install_fake_adapters(
+        monkeypatch, plex_present=True
+    )
+    job_id = prepare_and_approve(app, case)
+    with app.state.database.session_factory() as session:
+        job = session.get(DeletionJob, job_id)
+        assert job is not None
+        execute_movie_job(
+            session,
+            job,
+            app.state.credential_cipher,
+            admin_id=case["admin_id"],
+        )
+        assert job.state == "RECONCILE_REQUIRED"
+        overseerr = session.scalar(
+            select(IntegrationInstance).where(IntegrationInstance.kind == "OVERSEERR")
+        )
+        assert overseerr is not None
+        overseerr.enabled = False
+        session.commit()
+
+    plex.present = False
+    with app.state.database.session_factory() as session:
+        job = session.get(DeletionJob, job_id)
+        assert job is not None
+        retry_movie_reconciliation(
+            session,
+            job,
+            app.state.credential_cipher,
+            admin_id=case["admin_id"],
+        )
+        assert job.state == "COMPLETED"
+        assert "Exactly one enabled Overseerr" in job.external_state[
+            "overseerr_observation_error"
+        ]
 
 
 def test_legacy_resume_repairs_exclusion_before_torrent_cleanup(app, monkeypatch) -> None:

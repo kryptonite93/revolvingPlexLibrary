@@ -228,6 +228,10 @@ The detail surface enlarges the media spine and verdict, then presents a four-st
 
 Each service row combines a 2:3 media tile, identity and URL, stacked text states, routine actions, and a progressively disclosed configuration region. Read-only enablement, management mode, and Active Management are visibly separate concepts. Active Management remains locked until its prerequisites are met, and enabling it requires consequence copy plus an explicit confirmation when available.
 
+Radarr and Sonarr rows place one compact **Plex library pairing** control before management mode. Its default “Detect automatically” option compares exact, case-insensitive filenames from active Arr lifecycles with enabled Plex libraries of the compatible media type during Plex sync. Automation accepts only an unambiguous winner for both the candidate library and competing Arr instances; zero matches and ties remain pending. Once validated, an automatic pairing remains authoritative when a later sync proves the library empty, so absence can reconcile without erasing its scope; only new unique evidence or a manual choice can replace it. A manual library choice is the fallback for ambiguous installations, is labeled as manual, claims that library for one Arr instance, and is never overwritten by later automatic detection.
+
+The helper line carries the complete state in words: **auto** names successful filename detection, **manual** says that detection will not override the choice, and **pending** directs the owner to sync Plex or first select a compatible Plex library. Pending and mismatched states fail closed: destructive execution remains blocked until the Arr instance has a pairing and the lifecycle has been synchronized into that currently paired library. Returning to automatic detection clears stale lifecycle-to-Plex associations until fresh evidence establishes the pairing again.
+
 The add-service panel remains a single sticky form on wide screens and moves before the service list on narrower layouts. New services are presented as disabled by default, credential handling is explained before entry, and empty or unavailable operations teach the next safe step.
 
 ### Tracker Rules
@@ -252,7 +256,9 @@ The queue lists approval cases as flat divider-led rows with title, preparation 
 
 Preparation remains app-local. The title-specific execution form is the only destructive confirmation: one required checkbox sits beside a red **Delete movie** action, with no typed title, `DELETE [title]` phrase, or separate approval step. Its warning names the movie and files, discloses that Radarr creates or verifies an import exclusion so synchronized lists do not restore it, and explains that a deliberate Overseerr request can add it again. Mapped torrent data may be removed only after Radarr succeeds.
 
-Execution revalidates evidence before mutation, requires both Radarr deletion and import-exclusion confirmation before qBittorrent cleanup, and resumes from saved checkpoints without repeating confirmed work. Resume controls cover `REVALIDATED` as well as the later Radarr, torrent, and Plex checkpoints. Reconciliation may verify or repair the import exclusion before refreshing Plex and checking Overseerr requestability; it never deletes another media item or torrent. Amber marks reconciliation, red is reserved for deletion or resume, and cancellation stays quiet.
+Execution revalidates evidence before mutation, requires both Radarr deletion and import-exclusion confirmation before qBittorrent cleanup, and resumes from saved checkpoints without repeating confirmed work. Resume controls cover `REVALIDATED` as well as the later Radarr, torrent, and Plex checkpoints. Reconciliation may verify or repair the import exclusion before refreshing the currently paired Plex library; it waits only while the title remains present there and never deletes another media item or torrent. Amber marks reconciliation, red is reserved for deletion or resume, and cancellation stays quiet.
+
+Completion confirms Radarr absence, torrent handling, and absence from the paired Plex library. Overseerr availability is observed after that refresh but is neither a completion gate nor a mutation target. When Overseerr still reports stale availability—or cannot be read—the completed panel appends an explicit review warning and states that no Overseerr record was changed.
 
 ## Do's and Don'ts
 
@@ -264,6 +270,7 @@ Execution revalidates evidence before mutation, requires both Radarr deletion an
 - **Do** use poster-like media geometry to establish context without obscuring URLs, health, or controls.
 - **Do** order lifecycle evidence from source freshness through import, watch, retention, protection, and torrent mapping before future action.
 - **Do** treat each media title as a traceable case file with explicit unknown, stale, blocked, and empty states.
+- **Do** state whether each Arr-to-Plex pairing was detected automatically, set manually, or is still pending, with the next safe step beside the control.
 - **Do** keep preparation, the single destructive confirmation, resume, and reconciliation as explicitly named title-scoped states with a persistent correlation identifier and immutable checkpoint trail.
 - **Do** preserve visible labels, local validation, keyboard focus, and reduced-motion behavior.
 
@@ -273,6 +280,7 @@ Execution revalidates evidence before mutation, requires both Radarr deletion an
 - **Don't** make destructive controls look equivalent to routine connection or read-only actions.
 - **Don't** turn repeated service records into a generic grid of floating cards.
 - **Don't** collapse lifecycle evidence into a poster grid, a single opaque score, or a color-only verdict.
+- **Don't** infer an Arr-to-Plex pairing from titles, identifiers, or folder similarity, or allow ambiguous and unsynchronized pairing evidence to reach deletion.
 - **Don't** add a typed title, `DELETE` phrase, or separate approval action to manual movie deletion; the title-specific checkbox is the explicit gate.
 - **Don't** let resume or reconciliation obscure completed checkpoints or delete another media item or torrent.
 - **Don't** use ornamental glass, decorative page-load choreography, or graph-heavy console styling.

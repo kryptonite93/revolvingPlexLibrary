@@ -112,6 +112,24 @@ class ManagedLibrary(Base):
     )
 
 
+class IntegrationLibraryMapping(Base):
+    __tablename__ = "integration_library_mapping"
+    __table_args__ = (
+        UniqueConstraint("library_id", name="uq_integration_library_mapping_library"),
+    )
+
+    integration_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("integration_instance.id"), primary_key=True
+    )
+    library_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("managed_library.id"), nullable=False, index=True
+    )
+    source: Mapped[str] = mapped_column(String(20), nullable=False, default="AUTO")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
+    )
+
+
 class SourceFreshness(Base):
     __tablename__ = "source_freshness"
     __table_args__ = (

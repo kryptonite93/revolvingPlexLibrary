@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from pathlib import PurePath
 from typing import Any
 from urllib.parse import urlparse
 
@@ -15,6 +16,7 @@ from app.integrations.qbittorrent import QBittorrentAdapter
 from app.integrations.tautulli import TautulliAdapter
 from app.persistence.models import (
     IntegrationInstance,
+    IntegrationLibraryMapping,
     InventoryPolicy,
     ManagedLibrary,
     MediaFileRevision,
@@ -741,6 +743,140 @@ def fetch_plex_inventory(
     ]
 
 
+def _plex_item_filenames(item: dict[str, Any]) -> set[str]:
+    filenames: set[str] = set()
+    media_rows = item.get("Media", [])
+    if isinstance(media_rows, dict):
+        media_rows = [media_rows]
+    for media in media_rows if isinstance(media_rows, list) else []:
+        if not isinstance(media, dict):
+            continue
+        parts = media.get("Part", [])
+        if isinstance(parts, dict):
+            parts = [parts]
+        for part in parts if isinstance(parts, list) else []:
+            if isinstance(part, dict) and part.get("file"):
+                filenames.add(PurePath(str(part["file"]).replace("\\", "/")).name.casefold())
+    return filenames
+
+
+def _auto_map_arr_libraries(
+    session: Session,
+    library_payloads: list[tuple[ManagedLibrary, list[dict[str, Any]]]],
+) -> None:
+    libraries_by_type: dict[str, list[ManagedLibrary]] = {"movie": [], "show": []}
+    filenames_by_library: dict[str, set[str]] = {}
+    for library, items in library_payloads:
+        if library.media_type in libraries_by_type:
+            libraries_by_type[library.media_type].append(library)
+        filenames_by_library[library.id] = {
+            filename for item in items for filename in _plex_item_filenames(item)
+        }
+
+    mappings = {
+        mapping.integration_id: mapping
+        for mapping in session.scalars(select(IntegrationLibraryMapping)).all()
+    }
+    reserved_libraries = {
+        mapping.library_id for mapping in mappings.values() if mapping.source == "MANUAL"
+    }
+    arr_integrations = session.scalars(
+        select(IntegrationInstance).where(
+            IntegrationInstance.kind.in_(("RADARR", "SONARR")),
+            IntegrationInstance.enabled.is_(True),
+        )
+    ).all()
+    proposals: dict[str, tuple[str, int]] = {}
+    for integration in arr_integrations:
+        existing = mappings.get(integration.id)
+        if existing and existing.source == "MANUAL":
+            continue
+        media_type = "movie" if integration.kind == "RADARR" else "show"
+        candidates = [
+            library
+            for library in libraries_by_type[media_type]
+            if library.id not in reserved_libraries
+        ]
+        lifecycle_filenames = {
+            PurePath(path.replace("\\", "/")).name.casefold()
+            for path in session.scalars(
+                select(MediaLifecycle.current_path).where(
+                    MediaLifecycle.integration_id == integration.id,
+                    MediaLifecycle.current_path.is_not(None),
+                    MediaLifecycle.state == "ACTIVE",
+                )
+            ).all()
+            if path
+        }
+        scores = sorted(
+            (
+                (len(lifecycle_filenames & filenames_by_library.get(library.id, set())), library.id)
+                for library in candidates
+            ),
+            reverse=True,
+        )
+        if scores and scores[0][0] > 0 and (len(scores) == 1 or scores[0][0] > scores[1][0]):
+            proposals[integration.id] = (scores[0][1], scores[0][0])
+
+    library_claims: dict[str, list[tuple[str, int]]] = {}
+    for integration_id, (library_id, score) in proposals.items():
+        library_claims.setdefault(library_id, []).append((integration_id, score))
+    accepted: dict[str, str] = {}
+    for library_id, claims in library_claims.items():
+        ranked = sorted(claims, key=lambda claim: claim[1], reverse=True)
+        if len(ranked) == 1 or ranked[0][1] > ranked[1][1]:
+            accepted[ranked[0][0]] = library_id
+
+    active_integration_ids = {integration.id for integration in arr_integrations}
+    current_library_ids = {library.id for library, _items in library_payloads}
+    for mapping in mappings.values():
+        if (
+            mapping.source == "AUTO"
+            and mapping.library_id in current_library_ids
+            and mapping.integration_id not in active_integration_ids
+        ):
+            session.delete(mapping)
+
+    accepted_owner_by_library = {
+        library_id: integration_id for integration_id, library_id in accepted.items()
+    }
+    for integration in arr_integrations:
+        existing = mappings.get(integration.id)
+        if existing and existing.source == "MANUAL":
+            continue
+        target_library_id = accepted.get(integration.id)
+        claimed_by_other = bool(
+            existing
+            and accepted_owner_by_library.get(existing.library_id) not in (None, integration.id)
+        )
+        if existing is not None and (
+            (target_library_id is not None and existing.library_id != target_library_id)
+            or claimed_by_other
+        ):
+            session.delete(existing)
+    session.flush()
+
+    for integration in arr_integrations:
+        existing = session.get(IntegrationLibraryMapping, integration.id)
+        if existing and existing.source == "MANUAL":
+            continue
+        library_id = accepted.get(integration.id)
+        if library_id is None:
+            continue
+        if existing is None:
+            session.add(
+                IntegrationLibraryMapping(
+                    integration_id=integration.id,
+                    library_id=library_id,
+                    source="AUTO",
+                )
+            )
+        else:
+            existing.library_id = library_id
+            existing.source = "AUTO"
+    session.flush()
+
+
 def sync_plex(
     session: Session,
     integration: IntegrationInstance,
@@ -753,6 +889,19 @@ def sync_plex(
         if library_payloads is not None
         else fetch_plex_inventory(session, integration, credentials)
     )
+    _auto_map_arr_libraries(session, library_payloads)
+    mappings = {
+        mapping.integration_id: mapping.library_id
+        for mapping in session.scalars(select(IntegrationLibraryMapping)).all()
+    }
+    arr_lifecycles = session.scalars(
+        select(MediaLifecycle)
+        .join(IntegrationInstance, IntegrationInstance.id == MediaLifecycle.integration_id)
+        .where(IntegrationInstance.kind.in_(("RADARR", "SONARR")))
+    ).all()
+    for lifecycle in arr_lifecycles:
+        lifecycle.plex_rating_key = None
+        lifecycle.library_id = mappings.get(lifecycle.integration_id)
     item_count = 0
     mapped_count = 0
     for library, items in library_payloads:
@@ -780,10 +929,12 @@ def sync_plex(
                     )
             if identity is None:
                 continue
-            lifecycle = session.scalar(
+            lifecycles = session.scalars(
                 select(MediaLifecycle).where(MediaLifecycle.identity_id == identity.id)
-            )
-            if lifecycle:
+            ).all()
+            for lifecycle in lifecycles:
+                if mappings.get(lifecycle.integration_id) != library.id:
+                    continue
                 lifecycle.plex_rating_key = rating_key
                 lifecycle.library_id = library.id
                 mapped_count += 1

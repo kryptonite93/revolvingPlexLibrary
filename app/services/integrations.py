@@ -15,6 +15,7 @@ from app.integrations.tautulli import TautulliAdapter
 from app.integrations.urls import normalize_base_url
 from app.persistence.models import (
     IntegrationInstance,
+    IntegrationLibraryMapping,
     ManagedLibrary,
     MediaFileRevision,
     MediaLifecycle,
@@ -144,6 +145,12 @@ def remove_integration_local_data(session: Session, integration: IntegrationInst
     library_ids = list(
         session.scalars(
             select(ManagedLibrary.id).where(ManagedLibrary.plex_integration_id == integration_id)
+        )
+    )
+    session.execute(
+        delete(IntegrationLibraryMapping).where(
+            (IntegrationLibraryMapping.integration_id == integration_id)
+            | (IntegrationLibraryMapping.library_id.in_(library_ids))
         )
     )
     if library_ids:
@@ -309,3 +316,60 @@ def set_active_management(integration: IntegrationInstance, *, enabled: bool) ->
     if integration.dry_run_evaluated_at is None:
         raise ValueError("A current dry-run evaluation is required")
     integration.active_management_enabled = True
+
+
+def set_plex_library_mapping(
+    session: Session,
+    integration: IntegrationInstance,
+    library_id: str | None,
+) -> IntegrationLibraryMapping | None:
+    if integration.kind not in ARR_KINDS:
+        raise ValueError("Plex library mapping only applies to Radarr and Sonarr")
+    existing = session.get(IntegrationLibraryMapping, integration.id)
+    if not library_id:
+        if existing is not None:
+            session.delete(existing)
+        for lifecycle in session.scalars(
+            select(MediaLifecycle).where(MediaLifecycle.integration_id == integration.id)
+        ).all():
+            lifecycle.library_id = None
+            lifecycle.plex_rating_key = None
+        session.flush()
+        return None
+
+    library = session.get(ManagedLibrary, library_id)
+    required_type = "movie" if integration.kind == "RADARR" else "show"
+    if library is None or not library.enabled or library.media_type != required_type:
+        raise ValueError(
+            f"Choose an enabled Plex {required_type} library for {integration.name}"
+        )
+    conflict = session.scalar(
+        select(IntegrationLibraryMapping).where(
+            IntegrationLibraryMapping.library_id == library.id,
+            IntegrationLibraryMapping.integration_id != integration.id,
+        )
+    )
+    if conflict is not None:
+        owner = session.get(IntegrationInstance, conflict.integration_id)
+        owner_name = owner.name if owner else "another Arr instance"
+        raise ValueError(f"{library.name} is already paired with {owner_name}")
+    if existing is None:
+        existing = IntegrationLibraryMapping(
+            integration_id=integration.id,
+            library_id=library.id,
+            source="MANUAL",
+        )
+        session.add(existing)
+    else:
+        existing.library_id = library.id
+        existing.source = "MANUAL"
+    for lifecycle in session.scalars(
+        select(MediaLifecycle).where(
+            MediaLifecycle.integration_id == integration.id,
+            MediaLifecycle.library_id != library.id,
+        )
+    ).all():
+        lifecycle.library_id = None
+        lifecycle.plex_rating_key = None
+    session.flush()
+    return existing

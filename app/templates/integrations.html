@@ -139,6 +139,8 @@
         {% if integrations %}
           {% for integration in integrations %}
           {% set libraries = libraries_by_plex.get(integration.id, []) %}
+          {% set library_mapping = library_mappings.get(integration.id) %}
+          {% set arr_libraries = enabled_libraries_by_arr.get(integration.id, []) %}
           {% set requesters = requesters_by_integration.get(integration.id, []) %}
           {% set source = freshness_by_integration.get(integration.id) %}
           <article class="integration-row">
@@ -215,6 +217,17 @@
                 {% endif %}
 
                 {% if integration.kind in ("RADARR", "SONARR") %}
+                <div class="control-group"><h4>Plex library pairing</h4><p>Automatic detection compares exact filenames across both services. Choose a library only when the match is ambiguous.</p>
+                  <form method="post" action="/integrations/{{ integration.id }}/plex-library" class="inline-form">
+                    <input type="hidden" name="csrf" value="{{ csrf_token }}">
+                    <label>Library<select name="library_id" aria-describedby="plex-library-note-{{ integration.id }}">
+                      <option value="" {% if not library_mapping %}selected{% endif %}>Detect automatically</option>
+                      {% for library in arr_libraries %}<option value="{{ library.id }}" {% if library_mapping and library_mapping.library_id == library.id %}selected{% endif %}>{{ library.name }} · Plex section {{ library.external_id }}</option>{% endfor %}
+                    </select></label>
+                    <small id="plex-library-note-{{ integration.id }}">{% if library_mapping %}{% if library_mapping.source == 'AUTO' %}Detected automatically from matching filenames.{% else %}Manually paired; automatic detection will not override this choice.{% endif %}{% else %}{% if arr_libraries %}Not paired yet. Sync Plex to try automatic detection.{% else %}Select and sync a compatible Plex library first.{% endif %}{% endif %}</small>
+                    <button class="button button-secondary" type="submit" data-save-button>Save Plex pairing</button>
+                  </form>
+                </div>
                 <div class="control-group"><h4>Management mode</h4><p>Ignored excludes this instance. Protected inventories without proposals. Managed permits proposals, but never bypasses Active Management.</p>
                   <form method="post" action="/integrations/{{ integration.id }}/management-mode" class="inline-form">
                     <input type="hidden" name="csrf" value="{{ csrf_token }}">
