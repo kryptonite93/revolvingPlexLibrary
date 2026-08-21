@@ -61,7 +61,19 @@ class PlexAdapter:
         return True
 
     def refresh_library(self, section_id: str) -> None:
-        self._get(f"/library/sections/{section_id}/refresh")
+        with self._client_factory(
+            base_url=self.base_url,
+            headers={
+                "X-Plex-Token": self.token,
+                "X-Plex-Client-Identifier": "revolving-plex-manager",
+                "X-Plex-Product": "Revolving Plex Manager",
+                "Accept": "application/json",
+            },
+            timeout=10.0,
+            follow_redirects=False,
+        ) as client:
+            response = client.get(f"/library/sections/{section_id}/refresh")
+            response.raise_for_status()
 
     def test_connection(self) -> ConnectionTestResult:
         payload = self._get("/")

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fixed Plex reconciliation when a successful library refresh returns an empty response.
+- Simplified movie execution to one confirmation checkbox and made every Radarr deletion create or verify an import exclusion so synchronized lists cannot silently restore it.
 - Added restart-safe, explicitly approved movie deletion jobs for a Managed Radarr instance, with fresh live revalidation, Radarr-first ordering, optional mapped-torrent cleanup, and Plex/Overseerr reconciliation.
 - Added staged global rollout controls and kept Sonarr execution unavailable while the non-4K Radarr manual workflow is validated.
 - Removed stale media mappings when torrents disappear from qBittorrent and excluded absent torrents from current deletion evidence.

@@ -35,6 +35,7 @@ from app.services.rollout import get_rollout_policy
 
 TERMINAL_JOB_STATES = {"COMPLETED", "CANCELLED"}
 EXECUTABLE_JOB_STATES = {
+    "PENDING_APPROVAL",
     "APPROVED",
     "BLOCKED",
     "FAILED",
@@ -217,6 +218,15 @@ def approve_movie_job(
         raise DeletionJobError("The deletion proposal is no longer eligible.")
     if confirmation_title.strip() != identity.canonical_title:
         raise DeletionJobError(f"Type {identity.canonical_title} exactly to approve this job.")
+    _authorize_movie_job(session, job, admin_id=admin_id)
+
+
+def _authorize_movie_job(session: Session, job: DeletionJob, *, admin_id: str) -> None:
+    _lifecycle, identity, _integration, proposal = _job_record(session, job)
+    if job.state != "PENDING_APPROVAL":
+        raise DeletionJobError("This job is not awaiting approval.")
+    if proposal is None or proposal.state != "ELIGIBLE":
+        raise DeletionJobError("The deletion proposal is no longer eligible.")
     job.approved_by_admin_id = admin_id
     job.approved_at = utc_now()
     _transition(
@@ -428,8 +438,14 @@ def _live_revalidate(
     live_movie = arr_adapter.movie(lifecycle.arr_item_id)
     if live_movie is None or not live_movie.get("hasFile"):
         raise DeletionBlocked("Radarr no longer reports this movie with a downloaded file.")
-    if identity.tmdb_id and int(live_movie.get("tmdbId") or 0) != identity.tmdb_id:
+    live_tmdb_id = int(live_movie.get("tmdbId") or 0)
+    if live_tmdb_id <= 0:
+        raise DeletionBlocked(
+            "Radarr did not provide a TMDb ID, so an import exclusion cannot be guaranteed."
+        )
+    if identity.tmdb_id and live_tmdb_id != identity.tmdb_id:
         raise DeletionBlocked("Radarr returned a different TMDb identity for this movie.")
+    identity.tmdb_id = live_tmdb_id
 
     plex_credentials = cipher.decrypt(plex.credentials_encrypted)
     plex_adapter = PlexAdapter(plex.base_url, plex_credentials["api_key"])
@@ -462,6 +478,7 @@ def _live_revalidate(
             "integration_id": integration.id,
             "arr_item_id": lifecycle.arr_item_id,
             "has_file": bool(live_movie.get("hasFile")),
+            "add_import_exclusion": True,
         },
         "plex": {
             "integration_id": plex.id,
@@ -509,19 +526,85 @@ def _execute_radarr_delete(
     cipher: CredentialCipher,
 ) -> None:
     lifecycle, _identity, integration, _proposal = _ensure_capability_gates(session, job)
+    verified_tmdb_id = _verified_snapshot_tmdb_id(session, job)
     credentials = cipher.decrypt(integration.credentials_encrypted)
     adapter = ArrAdapter(integration.base_url, credentials["api_key"])
     if job.state != "RADARR_DELETE_REQUESTED":
         _transition(session, job, "RADARR_DELETE_REQUESTED", "CALLING_RADARR_DELETE")
-    if adapter.movie(lifecycle.arr_item_id) is not None:
-        adapter.delete_movie(lifecycle.arr_item_id)
+    live_movie = adapter.movie(lifecycle.arr_item_id)
+    if live_movie is not None:
+        live_tmdb_id = int(live_movie.get("tmdbId") or 0)
+        if live_tmdb_id != verified_tmdb_id:
+            raise DeletionBlocked(
+                "Radarr now reports a different or missing TMDb identity for this item; "
+                "the delete was stopped."
+            )
+        adapter.delete_movie(lifecycle.arr_item_id, add_import_exclusion=True)
     if adapter.movie(lifecycle.arr_item_id) is not None:
         raise DeletionJobError("Radarr accepted the request but still reports the movie.")
+    _ensure_radarr_import_exclusion(session, job, cipher)
     lifecycle.state = "DELETED"
     lifecycle.deleted_at = utc_now()
     lifecycle.decision = "DELETED"
-    lifecycle.decision_reason = "Deleted through an explicitly approved Radarr workflow"
-    _transition(session, job, "RADARR_DELETED", "RADARR_DELETE_CONFIRMED")
+    lifecycle.decision_reason = (
+        "Deleted through an explicitly approved Radarr workflow with import exclusion"
+    )
+    _transition(
+        session,
+        job,
+        "RADARR_DELETED",
+        "RADARR_DELETE_AND_EXCLUSION_CONFIRMED",
+    )
+
+
+def _verified_snapshot_tmdb_id(session: Session, job: DeletionJob) -> int:
+    _lifecycle, identity, _integration, _proposal = _job_record(session, job)
+    try:
+        tmdb_id = int(job.execution_snapshot.get("tmdb_id") or 0)
+    except (TypeError, ValueError):
+        tmdb_id = 0
+    if tmdb_id <= 0:
+        raise DeletionBlocked(
+            "This job has no live-verified TMDb ID, so its Radarr import exclusion "
+            "cannot be guaranteed. Prepare a new deletion case after synchronizing Radarr."
+        )
+    if identity.tmdb_id and identity.tmdb_id != tmdb_id:
+        raise DeletionBlocked("The stored TMDb identity no longer matches this deletion job.")
+    return tmdb_id
+
+
+def _ensure_radarr_import_exclusion(
+    session: Session,
+    job: DeletionJob,
+    cipher: CredentialCipher,
+) -> None:
+    lifecycle, identity, integration, _proposal = _ensure_capability_gates(session, job)
+    tmdb_id = _verified_snapshot_tmdb_id(session, job)
+    adapter = ArrAdapter(
+        integration.base_url,
+        cipher.decrypt(integration.credentials_encrypted)["api_key"],
+    )
+    created = adapter.ensure_import_exclusion(
+        tmdb_id,
+        identity.canonical_title,
+        identity.year,
+    )
+    external_state = dict(job.external_state)
+    external_state["radarr_import_exclusion_confirmed"] = True
+    job.external_state = external_state
+    if created:
+        _event(
+            session,
+            job,
+            "deletion.radarr_import_exclusion_created",
+            actor_type="system",
+            actor_id=None,
+            payload={
+                "arr_item_id": lifecycle.arr_item_id,
+                "tmdb_id": tmdb_id,
+            },
+        )
+    session.commit()
 
 
 def _execute_torrent_deletes(
@@ -530,6 +613,7 @@ def _execute_torrent_deletes(
     cipher: CredentialCipher,
 ) -> None:
     _ensure_capability_gates(session, job)
+    _ensure_radarr_import_exclusion(session, job, cipher)
     torrents = list(job.execution_snapshot.get("torrents", []))
     external_state = dict(job.external_state)
     deleted = set(external_state.get("torrent_ids_deleted", []))
@@ -573,6 +657,7 @@ def _refresh_and_reconcile(
     cipher: CredentialCipher,
 ) -> None:
     _ensure_capability_gates(session, job)
+    _ensure_radarr_import_exclusion(session, job, cipher)
     lifecycle, identity, _integration, _proposal = _job_record(session, job)
     plex_snapshot = dict(job.execution_snapshot.get("plex", {}))
     plex = session.get(IntegrationInstance, str(plex_snapshot.get("integration_id")))
@@ -634,15 +719,12 @@ def execute_movie_job(
     cipher: CredentialCipher,
     *,
     admin_id: str,
-    confirmation_phrase: str,
 ) -> None:
-    _lifecycle, identity, _integration, _proposal = _job_record(session, job)
-    if confirmation_phrase.strip() != f"DELETE {identity.canonical_title}":
-        raise DeletionJobError(
-            f"Type DELETE {identity.canonical_title} exactly to execute this job."
-        )
     if job.state not in EXECUTABLE_JOB_STATES:
         raise DeletionJobError("This job is not approved for execution.")
+    if job.state == "PENDING_APPROVAL":
+        _authorize_movie_job(session, job, admin_id=admin_id)
+    _lifecycle, identity, _integration, _proposal = _job_record(session, job)
     _event(
         session,
         job,

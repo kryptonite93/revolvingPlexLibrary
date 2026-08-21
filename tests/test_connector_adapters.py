@@ -162,3 +162,15 @@ def test_plex_execution_checks_sessions_then_refreshes_one_library() -> None:
     adapter.refresh_library("1")
 
     assert paths == ["/status/sessions", "/library/sections/1/refresh"]
+
+
+def test_plex_refresh_accepts_a_successful_empty_response() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/library/sections/1/refresh"
+        return httpx.Response(200, content=b"")
+
+    PlexAdapter(
+        "http://plex:32400",
+        "plex-token",
+        client_factory=client_factory(handler),
+    ).refresh_library("1")

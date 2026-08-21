@@ -77,7 +77,7 @@ def test_arr_history_inventory_follows_every_page() -> None:
     assert requested_pages == [1, 2]
 
 
-def test_radarr_delete_removes_files_without_adding_an_exclusion() -> None:
+def test_radarr_delete_removes_files_and_adds_an_import_exclusion() -> None:
     observed: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -95,5 +95,43 @@ def test_radarr_delete_removes_files_without_adding_an_exclusion() -> None:
     assert request.method == "DELETE"
     assert request.url.path == "/api/v3/movie/42"
     assert request.url.params["deleteFiles"] == "true"
-    assert request.url.params["addImportExclusion"] == "false"
+    assert request.url.params["addImportExclusion"] == "true"
     assert request.headers["X-Api-Key"] == "secret"
+
+
+def test_radarr_creates_a_missing_import_exclusion() -> None:
+    observed: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed.append(request)
+        if request.method == "GET":
+            return httpx.Response(200, json=[])
+        return httpx.Response(201)
+
+    created = ArrAdapter(
+        "http://radarr:7878",
+        "secret",
+        client_factory=client_factory(handler),
+    ).ensure_import_exclusion(123, "A Movie", 2026)
+
+    assert created is True
+    assert [request.method for request in observed] == ["GET", "POST"]
+    assert observed[1].url.path == "/api/v3/exclusions"
+    assert observed[1].content == b'{"tmdbId":123,"movieTitle":"A Movie","movieYear":2026}'
+
+
+def test_radarr_does_not_recreate_an_existing_import_exclusion() -> None:
+    observed: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed.append(request)
+        return httpx.Response(200, json=[{"id": 9, "tmdbId": 123}])
+
+    created = ArrAdapter(
+        "http://radarr:7878",
+        "secret",
+        client_factory=client_factory(handler),
+    ).ensure_import_exclusion(123, "A Movie", 2026)
+
+    assert created is False
+    assert [request.method for request in observed] == ["GET"]

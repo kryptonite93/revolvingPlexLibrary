@@ -1830,7 +1830,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def deletion_job_execute(
         job_id: str,
         request: Request,
-        confirm_phrase: str = Form(),
         acknowledge: str | None = Form(None),
         csrf: str = Form(),
         session: Session = Depends(_session),
@@ -1862,7 +1861,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     job,
                     request.app.state.credential_cipher,
                     admin_id=admin.id,
-                    confirmation_phrase=confirm_phrase,
                 )
         except SyncAlreadyRunning:
             return _deletion_redirect(

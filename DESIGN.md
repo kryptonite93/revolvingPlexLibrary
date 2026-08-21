@@ -250,7 +250,9 @@ Rollout Control presents Inventory Only, Dry Run, and Approval Required as a wri
 
 The queue lists approval cases as flat divider-led rows with title, preparation time, written job state, and current checkpoint. Each title-specific case repeats identity, integration, media type, size, state, and correlation identifier before a four-part safety ledger for rollout, Radarr scope, stored decision, and external-change status. The lower split view keeps one next safe action beside an ordered, immutable execution trail so recovery state is visible before any retry.
 
-Preparing and approving remain app-local steps. Approval requires the exact movie title; execution and resume require the full `DELETE [title]` phrase plus a separate authorization checkbox. Amber marks the pending approval or reconciliation action, red is reserved for external deletion or resume, and cancellation stays quiet. Execution revalidates evidence before mutation, requires Radarr success before qBittorrent cleanup, resumes from saved checkpoints without repeating confirmed work, and isolates Plex or Overseerr convergence in an explicitly named reconciliation state.
+Preparation remains app-local. The title-specific execution form is the only destructive confirmation: one required checkbox sits beside a red **Delete movie** action, with no typed title, `DELETE [title]` phrase, or separate approval step. Its warning names the movie and files, discloses that Radarr creates or verifies an import exclusion so synchronized lists do not restore it, and explains that a deliberate Overseerr request can add it again. Mapped torrent data may be removed only after Radarr succeeds.
+
+Execution revalidates evidence before mutation, requires both Radarr deletion and import-exclusion confirmation before qBittorrent cleanup, and resumes from saved checkpoints without repeating confirmed work. Resume controls cover `REVALIDATED` as well as the later Radarr, torrent, and Plex checkpoints. Reconciliation may verify or repair the import exclusion before refreshing Plex and checking Overseerr requestability; it never deletes another media item or torrent. Amber marks reconciliation, red is reserved for deletion or resume, and cancellation stays quiet.
 
 ## Do's and Don'ts
 
@@ -262,7 +264,7 @@ Preparing and approving remain app-local steps. Approval requires the exact movi
 - **Do** use poster-like media geometry to establish context without obscuring URLs, health, or controls.
 - **Do** order lifecycle evidence from source freshness through import, watch, retention, protection, and torrent mapping before future action.
 - **Do** treat each media title as a traceable case file with explicit unknown, stale, blocked, and empty states.
-- **Do** separate preparation, approval, execution, resume, and reconciliation into explicitly named title-scoped steps with a persistent correlation identifier and immutable checkpoint trail.
+- **Do** keep preparation, the single destructive confirmation, resume, and reconciliation as explicitly named title-scoped states with a persistent correlation identifier and immutable checkpoint trail.
 - **Do** preserve visible labels, local validation, keyboard focus, and reduced-motion behavior.
 
 ### Don't:
@@ -271,6 +273,7 @@ Preparing and approving remain app-local steps. Approval requires the exact movi
 - **Don't** make destructive controls look equivalent to routine connection or read-only actions.
 - **Don't** turn repeated service records into a generic grid of floating cards.
 - **Don't** collapse lifecycle evidence into a poster grid, a single opaque score, or a color-only verdict.
-- **Don't** imply that approval executed a deletion or let a retry obscure which external steps already completed.
+- **Don't** add a typed title, `DELETE` phrase, or separate approval action to manual movie deletion; the title-specific checkbox is the explicit gate.
+- **Don't** let resume or reconciliation obscure completed checkpoints or delete another media item or torrent.
 - **Don't** use ornamental glass, decorative page-load choreography, or graph-heavy console styling.
 - **Don't** expose saved credentials back to the browser.

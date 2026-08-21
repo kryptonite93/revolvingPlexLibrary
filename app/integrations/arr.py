@@ -63,7 +63,7 @@ class ArrAdapter:
             raise ValueError("Radarr returned invalid movie data")
         return payload
 
-    def delete_movie(self, movie_id: int) -> None:
+    def delete_movie(self, movie_id: int, *, add_import_exclusion: bool = True) -> None:
         with self._client_factory(
             base_url=self.base_url,
             headers={"X-Api-Key": self.api_key, "Accept": "application/json"},
@@ -72,9 +72,38 @@ class ArrAdapter:
         ) as client:
             response = client.delete(
                 f"/api/v3/movie/{movie_id}",
-                params={"deleteFiles": "true", "addImportExclusion": "false"},
+                params={
+                    "deleteFiles": "true",
+                    "addImportExclusion": str(add_import_exclusion).lower(),
+                },
             )
             response.raise_for_status()
+
+    def ensure_import_exclusion(self, tmdb_id: int, title: str, year: int | None) -> bool:
+        payload = self.get_json("/api/v3/exclusions")
+        if not isinstance(payload, list):
+            raise ValueError("Radarr returned invalid import-exclusion data")
+        if any(
+            isinstance(item, dict) and int(item.get("tmdbId") or 0) == tmdb_id
+            for item in payload
+        ):
+            return False
+        with self._client_factory(
+            base_url=self.base_url,
+            headers={
+                "X-Api-Key": self.api_key,
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+            },
+            timeout=30.0,
+            follow_redirects=False,
+        ) as client:
+            response = client.post(
+                "/api/v3/exclusions",
+                json={"tmdbId": tmdb_id, "movieTitle": title, "movieYear": year or 0},
+            )
+            response.raise_for_status()
+        return True
 
     def _movie_files(self, movies: list[dict[str, Any]]) -> list[dict[str, Any]]:
         movie_ids = [int(item["id"]) for item in movies if item.get("id") is not None]
