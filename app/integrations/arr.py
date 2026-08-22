@@ -150,10 +150,7 @@ class ArrAdapter:
         payload = self.get_json("/api/v3/exclusions")
         if not isinstance(payload, list):
             raise ValueError("Radarr returned invalid import-exclusion data")
-        if any(
-            isinstance(item, dict) and int(item.get("tmdbId") or 0) == tmdb_id
-            for item in payload
-        ):
+        if self._has_import_exclusion(payload, tmdb_id):
             return False
         with self._client_factory(
             base_url=self.base_url,
@@ -169,8 +166,21 @@ class ArrAdapter:
                 "/api/v3/exclusions",
                 json={"tmdbId": tmdb_id, "movieTitle": title, "movieYear": year or 0},
             )
+            if response.status_code in {400, 409}:
+                refreshed = self.get_json("/api/v3/exclusions")
+                if not isinstance(refreshed, list):
+                    raise ValueError("Radarr returned invalid import-exclusion data")
+                if self._has_import_exclusion(refreshed, tmdb_id):
+                    return False
             response.raise_for_status()
         return True
+
+    @staticmethod
+    def _has_import_exclusion(payload: list[Any], tmdb_id: int) -> bool:
+        return any(
+            isinstance(item, dict) and int(item.get("tmdbId") or 0) == tmdb_id
+            for item in payload
+        )
 
     def _movie_files(self, movies: list[dict[str, Any]]) -> list[dict[str, Any]]:
         movie_ids = [int(item["id"]) for item in movies if item.get("id") is not None]

@@ -4,6 +4,7 @@ import json
 from typing import Any
 
 import httpx
+import pytest
 
 from app.integrations.arr import ArrAdapter
 
@@ -136,6 +137,50 @@ def test_radarr_does_not_recreate_an_existing_import_exclusion() -> None:
 
     assert created is False
     assert [request.method for request in observed] == ["GET"]
+
+
+@pytest.mark.parametrize("conflict_status", [400, 409])
+def test_radarr_accepts_an_exclusion_created_during_a_stale_lookup(
+    conflict_status: int,
+) -> None:
+    observed: list[httpx.Request] = []
+    get_count = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal get_count
+        observed.append(request)
+        if request.method == "GET":
+            get_count += 1
+            return httpx.Response(
+                200,
+                json=[] if get_count == 1 else [{"id": 9, "tmdbId": 123}],
+            )
+        return httpx.Response(conflict_status, json={"message": "Exclusion already exists"})
+
+    created = ArrAdapter(
+        "http://radarr:7878",
+        "secret",
+        client_factory=client_factory(handler),
+    ).ensure_import_exclusion(123, "A Movie", 2026)
+
+    assert created is False
+    assert [request.method for request in observed] == ["GET", "POST", "GET"]
+
+
+def test_radarr_rejects_a_bad_exclusion_when_a_fresh_lookup_is_still_empty() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return httpx.Response(200, json=[])
+        return httpx.Response(400, json={"message": "movieYear is invalid"})
+
+    with pytest.raises(httpx.HTTPStatusError) as error:
+        ArrAdapter(
+            "http://radarr:7878",
+            "secret",
+            client_factory=client_factory(handler),
+        ).ensure_import_exclusion(123, "A Movie", 2026)
+
+    assert error.value.response.status_code == 400
 
 
 def test_sonarr_deletes_only_selected_episode_files_and_unmonitors_the_season() -> None:

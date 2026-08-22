@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Fixed Manual Management retries getting stranded when Radarr reports a duplicate import exclusion as HTTP 400 or 409 after deleting a movie.
 - Changed Manual Management’s filtered selection into a select-all-except workflow with editable checkboxes and cross-page exclusions.
 - Added Overseerr request date as a Manual Management sorting option.
 - Added ascending and descending Manual Management sorting by name, last meaningful watch, release date, or size.
