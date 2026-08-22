@@ -39,7 +39,7 @@ from app.services.rollout import get_rollout_policy
 
 TRACKER_FILTERS = {"ALL", "MET", "NOT_MET"}
 WATCH_FILTERS = {"ALL", "WATCHED", "NEVER_WATCHED"}
-SORT_FIELDS = {"NAME", "LAST_WATCHED", "RELEASE_DATE", "SIZE"}
+SORT_FIELDS = {"NAME", "LAST_WATCHED", "REQUEST_DATE", "RELEASE_DATE", "SIZE"}
 SORT_DIRECTIONS = {"ASC", "DESC"}
 PAGE_SIZE = 25
 
@@ -304,14 +304,22 @@ def _sort_groups(
             return group.total_size
         if sort_field == "RELEASE_DATE":
             return group.year
-        watched = [
-            candidate.lifecycle.last_meaningful_watch_at
-            for candidate in group.candidates
-            if candidate.lifecycle.last_meaningful_watch_at is not None
-        ]
-        if not watched:
+        dates = (
+            [
+                candidate.requested_at
+                for candidate in group.candidates
+                if candidate.requested_at is not None
+            ]
+            if sort_field == "REQUEST_DATE"
+            else [
+                candidate.lifecycle.last_meaningful_watch_at
+                for candidate in group.candidates
+                if candidate.lifecycle.last_meaningful_watch_at is not None
+            ]
+        )
+        if not dates:
             return None
-        latest = max(watched)
+        latest = max(dates)
         return latest.timestamp()
 
     known = [group for group in groups if value(group) is not None]

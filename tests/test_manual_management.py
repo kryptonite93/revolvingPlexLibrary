@@ -127,6 +127,7 @@ def test_manual_management_links_one_requester_into_other_arr_instances(client, 
                     tmdb_id=321,
                     status="2",
                     requester_id="9",
+                    requested_at=datetime(2026, 3, 4, tzinfo=UTC),
                     present=True,
                 ),
                 RequestRecord(
@@ -136,6 +137,7 @@ def test_manual_management_links_one_requester_into_other_arr_instances(client, 
                     tmdb_id=322,
                     status="2",
                     requester_id="9",
+                    requested_at=datetime(2025, 3, 4, tzinfo=UTC),
                     present=True,
                 ),
                 RequestRecord(
@@ -258,6 +260,23 @@ def test_manual_management_links_one_requester_into_other_arr_instances(client, 
     assert (
         '<option value="LAST_WATCHED" selected>Last watched</option>'
         in watched_sorted_page.text
+    )
+
+    requested_sorted_page = client.get(
+        "/manual-management",
+        params={
+            "requester": requester_id,
+            "instance": radarr_id,
+            "sort": "REQUEST_DATE",
+            "direction": "DESC",
+        },
+    )
+    assert requested_sorted_page.text.index(
+        "Cross Instance Movie"
+    ) < requested_sorted_page.text.index("Zulu Older Movie")
+    assert (
+        '<option value="REQUEST_DATE" selected>Date requested</option>'
+        in requested_sorted_page.text
     )
 
     television_page = client.get(
