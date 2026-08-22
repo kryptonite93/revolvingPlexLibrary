@@ -13,6 +13,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import case, func, select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -785,29 +786,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         batch: ManualDeletionBatch | None = None
         try:
-            profile, integration, candidates = resolve_manual_selection(
-                session,
-                requester_profile_id=requester_profile_id,
-                integration_id=integration_id,
-                tracker_filter=tracker_filter,
-                watch_filter=watch_filter,
-                lifecycle_ids=lifecycle_ids,
-                excluded_lifecycle_ids=excluded_lifecycle_ids,
-                select_all_filtered=select_all_filtered == "yes",
-            )
-            batch = create_manual_batch(
-                session,
-                profile=profile,
-                integration=integration,
-                candidates=candidates,
-                admin_id=admin.id,
-                add_import_exclusion=add_import_exclusion == "yes",
-            )
             with request.app.state.sync_coordinator.acquire(
-                batch.id,
-                f"Manual Management: {integration.name}",
+                f"manual:{uuid.uuid4()}",
+                "Manual Management",
                 trigger="manual_management",
             ):
+                profile, integration, candidates = resolve_manual_selection(
+                    session,
+                    requester_profile_id=requester_profile_id,
+                    integration_id=integration_id,
+                    tracker_filter=tracker_filter,
+                    watch_filter=watch_filter,
+                    lifecycle_ids=lifecycle_ids,
+                    excluded_lifecycle_ids=excluded_lifecycle_ids,
+                    select_all_filtered=select_all_filtered == "yes",
+                )
+                batch = create_manual_batch(
+                    session,
+                    profile=profile,
+                    integration=integration,
+                    candidates=candidates,
+                    admin_id=admin.id,
+                    add_import_exclusion=add_import_exclusion == "yes",
+                )
                 execute_manual_batch(
                     session,
                     batch,
@@ -815,6 +816,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     admin_id=admin.id,
                 )
         except SyncAlreadyRunning:
+            session.rollback()
             return _manual_management_redirect(
                 requester_profile_id=requester_profile_id,
                 integration_id=integration_id,
@@ -822,8 +824,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 watch_filter=watch_filter,
                 sort_field=sort_field,
                 sort_direction=sort_direction,
-                batch_id=batch.id if batch else "",
-                error="Another inventory or deletion operation is running. Retry this batch later.",
+                error=(
+                    "Another inventory or deletion operation is running. "
+                    "Try again after it finishes."
+                ),
+            )
+        except OperationalError as database_error:
+            retry_batch_id = batch.id if batch else ""
+            session.rollback()
+            if "database is locked" not in str(database_error).lower():
+                raise
+            return _manual_management_redirect(
+                requester_profile_id=requester_profile_id,
+                integration_id=integration_id,
+                tracker_filter=tracker_filter,
+                watch_filter=watch_filter,
+                sort_field=sort_field,
+                sort_direction=sort_direction,
+                batch_id=retry_batch_id,
+                error=(
+                    "The database is busy with another operation. "
+                    "Try Manual Management again after it finishes."
+                ),
             )
         except ManualManagementError as validation_error:
             session.rollback()
@@ -876,9 +898,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     admin_id=admin.id,
                 )
         except SyncAlreadyRunning:
+            session.rollback()
             return _manual_management_redirect(
                 batch_id=batch.id,
                 error="Another inventory or deletion operation is running. Try again later.",
+            )
+        except OperationalError as database_error:
+            session.rollback()
+            if "database is locked" not in str(database_error).lower():
+                raise
+            return _manual_management_redirect(
+                batch_id=batch.id,
+                error=(
+                    "The database is busy with another operation. "
+                    "Retry unfinished steps after it finishes."
+                ),
             )
         except ManualManagementError as execution_error:
             return _manual_management_redirect(batch_id=batch.id, error=str(execution_error))

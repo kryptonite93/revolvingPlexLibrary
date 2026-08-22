@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Fixed Manual Management checking the operation coordinator only after attempting a database write, and replaced SQLite lock failures with a safe retry message.
 - Separated Arr automation protection from explicit Manual Management, allowing Active Management on Protected Radarr and Sonarr instances while automated proposals remain blocked, and prevented expanded Settings controls from colliding at intermediate widths.
 - Fixed Manual Management retries getting stranded when Radarr reports a duplicate import exclusion as HTTP 400 or 409 after deleting a movie.
 - Changed Manual Management’s filtered selection into a select-all-except workflow with editable checkboxes and cross-page exclusions.

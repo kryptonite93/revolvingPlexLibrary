@@ -4,7 +4,7 @@ import re
 from datetime import UTC, datetime
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import event, select
 
 from app.persistence.models import (
     AdminUser,
@@ -342,7 +342,16 @@ def test_manual_management_links_one_requester_into_other_arr_instances(client, 
     assert "Never meaningfully watched" in never_watched_page.text
 
 
-def test_coordinator_conflict_leaves_a_visible_batch_retry(client, app, monkeypatch) -> None:
+@pytest.mark.parametrize(
+    ("coordinator_busy", "expected_error"),
+    [
+        (True, "Another inventory or deletion operation is running"),
+        (False, "The database is busy with another operation"),
+    ],
+)
+def test_manual_submission_handles_a_locked_database_without_a_server_error(
+    client, app, monkeypatch, coordinator_busy, expected_error
+) -> None:
     authenticate(client)
     with app.state.database.session_factory() as session:
         admin = session.scalar(select(AdminUser))
@@ -415,33 +424,44 @@ def test_coordinator_conflict_leaves_a_visible_batch_retry(client, app, monkeypa
             SyncActivity("other", "Another sync", "manual", datetime.now(UTC))
         )
 
-    monkeypatch.setattr(app.state.sync_coordinator, "acquire", busy)
+    if coordinator_busy:
+        monkeypatch.setattr(app.state.sync_coordinator, "acquire", busy)
     page = client.get(
         "/manual-management",
         params={"requester": requester_id, "instance": radarr_id, "tracker": "ALL"},
     )
-    response = client.post(
-        "/manual-management/execute",
-        data={
-            "requester_profile_id": requester_id,
-            "integration_id": radarr_id,
-            "tracker_filter": "ALL",
-            "lifecycle_ids": lifecycle_id,
-            "add_import_exclusion": "yes",
-            "acknowledge": "yes",
-            "csrf": csrf_from(page),
-        },
-    )
+
+    def short_busy_timeout(connection, _record) -> None:
+        connection.execute("PRAGMA busy_timeout=25")
+
+    event.listen(app.state.database.engine, "connect", short_busy_timeout)
+    app.state.database.engine.dispose()
+    lock_connection = app.state.database.engine.raw_connection()
+    lock_cursor = lock_connection.cursor()
+    lock_cursor.execute("BEGIN IMMEDIATE")
+    try:
+        response = client.post(
+            "/manual-management/execute",
+            data={
+                "requester_profile_id": requester_id,
+                "integration_id": radarr_id,
+                "tracker_filter": "ALL",
+                "lifecycle_ids": lifecycle_id,
+                "add_import_exclusion": "yes",
+                "acknowledge": "yes",
+                "csrf": csrf_from(page),
+            },
+        )
+    finally:
+        lock_connection.rollback()
+        lock_cursor.close()
+        lock_connection.close()
 
     assert response.status_code == 200
-    assert "Retry unfinished steps" in response.text
-    assert "Retry this batch later" in response.text
+    assert expected_error in response.text
     with app.state.database.session_factory() as session:
         batch = session.scalar(select(ManualDeletionBatch))
-        assert batch is not None
-        assert batch.state == "PENDING"
-        assert batch.completed_items == 0
-        assert batch.total_items == 1
+        assert batch is None
 
 
 @pytest.mark.parametrize(
