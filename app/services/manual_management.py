@@ -474,8 +474,10 @@ def create_manual_batch(
         raise ManualManagementError("Move the global rollout to Approval Required first.")
     if not integration.enabled or not integration.active_management_enabled:
         raise ManualManagementError(f"Enable Active Management for {integration.name} first.")
-    if integration.management_mode != "MANAGED":
-        raise ManualManagementError(f"Set {integration.name} to Managed first.")
+    if integration.management_mode not in {"PROTECTED", "MANAGED"}:
+        raise ManualManagementError(
+            f"Set {integration.name} to Protected or Managed first."
+        )
     batch = ManualDeletionBatch(
         correlation_id=str(uuid.uuid4()),
         requester_profile_id=profile.id,
@@ -679,8 +681,12 @@ def _revalidate_item(
         raise ManualManagementError("The selected item belongs to a different instance.")
     if not integration.enabled or not integration.active_management_enabled:
         raise ManualManagementError(f"Active Management is off for {integration.name}.")
-    if integration.management_mode != "MANAGED" or integration.health_status != "HEALTHY":
-        raise ManualManagementError(f"{integration.name} is not healthy and Managed.")
+    if integration.management_mode not in {"PROTECTED", "MANAGED"}:
+        raise ManualManagementError(
+            f"Set {integration.name} to Protected or Managed first."
+        )
+    if integration.health_status != "HEALTHY":
+        raise ManualManagementError(f"{integration.name} is not healthy.")
     if lifecycle.state != "ACTIVE":
         raise ManualManagementError("This item is no longer downloaded in the selected instance.")
     if not _request_still_matches(session, profile, identity):

@@ -294,7 +294,7 @@ def change_management_mode(
     if _MODE_RANK[normalized_target] > _MODE_RANK[previous] and not confirmed:
         raise ValueError("Confirm mode change before applying this mode")
     integration.management_mode = normalized_target
-    if normalized_target != "MANAGED":
+    if normalized_target == "IGNORED":
         integration.active_management_enabled = False
     return previous, normalized_target
 
@@ -307,8 +307,11 @@ def set_active_management(integration: IntegrationInstance, *, enabled: bool) ->
         return
     if not integration.enabled:
         raise ValueError("Enable the integration before Active Management")
-    if integration.kind in ARR_KINDS and integration.management_mode != "MANAGED":
-        raise ValueError("Set this Arr integration to Managed first")
+    if integration.kind in ARR_KINDS and integration.management_mode not in {
+        "PROTECTED",
+        "MANAGED",
+    }:
+        raise ValueError("Set this Arr integration to Protected or Managed first")
     if integration.health_status != "HEALTHY" or integration.last_success_at is None:
         raise ValueError("A successful connection test is required")
     if integration.full_sync_completed_at is None:

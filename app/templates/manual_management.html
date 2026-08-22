@@ -41,7 +41,7 @@
         <label>Target instance
           <select name="instance" required>
             <option value="">Choose an instance</option>
-            {% for integration in manual_page.integrations %}<option value="{{ integration.id }}" {% if manual_page.selected_integration and manual_page.selected_integration.id == integration.id %}selected{% endif %}>{{ integration.name }} · {{ integration.kind|title }}{% if not integration.active_management_enabled %} · Active Management off{% elif integration.management_mode != 'MANAGED' %} · {{ integration.management_mode|title }}{% endif %}</option>{% endfor %}
+            {% for integration in manual_page.integrations %}<option value="{{ integration.id }}" {% if manual_page.selected_integration and manual_page.selected_integration.id == integration.id %}selected{% endif %}>{{ integration.name }} · {{ integration.kind|title }}{% if integration.management_mode == 'PROTECTED' %} · Protected from automation · Manual deletion {{ 'enabled' if integration.active_management_enabled else 'disabled' }}{% elif integration.management_mode == 'IGNORED' %} · Ignored{% elif not integration.active_management_enabled %} · Active Management off{% endif %}</option>{% endfor %}
           </select>
         </label>
         <label>Tracker conditions

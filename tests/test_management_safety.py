@@ -30,15 +30,22 @@ def test_more_permissive_arr_mode_requires_confirmation() -> None:
     assert instance.management_mode == "MANAGED"
 
 
-def test_less_permissive_mode_disables_active_management() -> None:
+def test_protected_mode_preserves_active_management_for_manual_actions() -> None:
     instance = integration("RADARR", "MANAGED")
     instance.active_management_enabled = True
     change_management_mode(instance, "PROTECTED", confirmed=False)
+    assert instance.active_management_enabled is True
+
+
+def test_ignored_mode_disables_active_management() -> None:
+    instance = integration("RADARR", "MANAGED")
+    instance.active_management_enabled = True
+    change_management_mode(instance, "IGNORED", confirmed=False)
     assert instance.active_management_enabled is False
 
 
 def test_active_management_requires_sync_and_dry_run() -> None:
-    instance = integration("RADARR", "MANAGED")
+    instance = integration("RADARR", "PROTECTED")
     with pytest.raises(ValueError, match="full inventory sync"):
         set_active_management(instance, enabled=True)
     instance.full_sync_completed_at = datetime.now(UTC)
@@ -47,6 +54,14 @@ def test_active_management_requires_sync_and_dry_run() -> None:
     instance.dry_run_evaluated_at = datetime.now(UTC)
     set_active_management(instance, enabled=True)
     assert instance.active_management_enabled is True
+
+
+def test_ignored_arr_cannot_enable_active_management() -> None:
+    instance = integration("RADARR", "IGNORED")
+    instance.full_sync_completed_at = datetime.now(UTC)
+    instance.dry_run_evaluated_at = datetime.now(UTC)
+    with pytest.raises(ValueError, match="Protected or Managed"):
+        set_active_management(instance, enabled=True)
 
 
 def test_disabling_active_management_is_always_allowed() -> None:

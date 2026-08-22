@@ -12,6 +12,7 @@ from app.persistence.models import (
     IntegrationInstance,
     IntegrationLibraryMapping,
     ManagedLibrary,
+    RolloutPolicy,
     SourceFreshness,
 )
 
@@ -480,3 +481,49 @@ def test_active_management_route_is_blocked_in_inventory_only(client: TestClient
     with app.state.database.session_factory() as session:
         integration = session.get(IntegrationInstance, integration_id)
         assert integration is not None and integration.active_management_enabled is False
+
+
+def test_protected_arr_can_enable_active_management_for_manual_deletion(
+    client: TestClient, app
+) -> None:
+    authenticate(client)
+    now = datetime.now(UTC)
+    with app.state.database.session_factory() as session:
+        rollout = session.get(RolloutPolicy, "default")
+        if rollout is None:
+            rollout = RolloutPolicy(id="default", mode="APPROVAL_REQUIRED")
+            session.add(rollout)
+        else:
+            rollout.mode = "APPROVAL_REQUIRED"
+        radarr = IntegrationInstance(
+            kind="RADARR",
+            name="Radarr 4K",
+            base_url="http://radarr-4k:7878",
+            enabled=True,
+            management_mode="PROTECTED",
+            health_status="HEALTHY",
+            last_success_at=now,
+            full_sync_completed_at=now,
+            dry_run_evaluated_at=now,
+            credentials_encrypted=app.state.credential_cipher.encrypt({"api_key": "radarr"}),
+        )
+        session.add(radarr)
+        session.commit()
+        radarr_id = radarr.id
+
+    page = client.get("/settings")
+    assert "Protected blocks automated proposals" in page.text
+    assert "Manual Management may remove selected movies and files" in page.text
+    response = client.post(
+        f"/integrations/{radarr_id}/active-management",
+        data={"confirm_active": "yes", "csrf": csrf_from(page)},
+        follow_redirects=True,
+    )
+
+    assert "Active Management enabled for Radarr 4K" in response.text
+    assert "Protected · manual deletion on" in response.text
+    with app.state.database.session_factory() as session:
+        radarr = session.get(IntegrationInstance, radarr_id)
+        assert radarr is not None
+        assert radarr.management_mode == "PROTECTED"
+        assert radarr.active_management_enabled is True

@@ -66,7 +66,7 @@ def test_manual_management_links_one_requester_into_other_arr_instances(client, 
             base_url="http://radarr-4k:7878",
             enabled=True,
             active_management_enabled=True,
-            management_mode="MANAGED",
+            management_mode="PROTECTED",
             credentials_encrypted=app.state.credential_cipher.encrypt({"api_key": "radarr"}),
         )
         sonarr = IntegrationInstance(
@@ -202,6 +202,7 @@ def test_manual_management_links_one_requester_into_other_arr_instances(client, 
     assert "Zulu Older Movie" in movie_page.text
     assert "Radarr 4K" in movie_page.text
     assert "Protected" in movie_page.text
+    assert "Protected from automation · Manual deletion enabled" in movie_page.text
     assert "Meaningful watch" in movie_page.text
     assert "All watch history" in movie_page.text
     assert 'data-filtered-size="50000"' in movie_page.text
@@ -486,7 +487,7 @@ def test_manual_sonarr_batch_deletes_one_season_and_unmonitors_it(
             base_url="http://sonarr:8989",
             enabled=True,
             active_management_enabled=True,
-            management_mode="MANAGED",
+            management_mode="PROTECTED",
             health_status="HEALTHY",
             credentials_encrypted=app.state.credential_cipher.encrypt({"api_key": "sonarr"}),
         )

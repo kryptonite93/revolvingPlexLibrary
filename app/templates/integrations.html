@@ -152,7 +152,7 @@
               <div class="integration-state" aria-label="{{ integration.name }} state">
                 <span class="state-label state-{{ integration.health_status|lower }}">{{ integration.health_status|replace('_', ' ') }}</span>
                 <span class="state-label {% if integration.enabled %}state-enabled{% else %}state-disabled{% endif %}">{% if integration.enabled %}Enabled read-only{% else %}Disabled{% endif %}</span>
-                {% if integration.kind in ("RADARR", "SONARR") %}<span class="state-label state-{{ integration.management_mode|lower }}">{{ integration.management_mode|title }} · management {% if integration.active_management_enabled %}on{% else %}off{% endif %}</span>{% endif %}
+                {% if integration.kind in ("RADARR", "SONARR") %}<span class="state-label state-{{ integration.management_mode|lower }}">{% if integration.management_mode == 'PROTECTED' %}Protected · manual deletion {{ 'on' if integration.active_management_enabled else 'off' }}{% elif integration.management_mode == 'IGNORED' %}Ignored{% else %}Managed · Active Management {{ 'on' if integration.active_management_enabled else 'off' }}{% endif %}</span>{% endif %}
                 {% if integration.kind == "QBITTORRENT" %}<span class="state-label state-protected">Active Management {% if integration.active_management_enabled %}on{% else %}off{% endif %}</span>{% endif %}
               </div>
               <div class="integration-actions">
@@ -228,7 +228,7 @@
                     <button class="button button-secondary" type="submit" data-save-button>Save Plex pairing</button>
                   </form>
                 </div>
-                <div class="control-group"><h4>Management mode</h4><p>Ignored excludes this instance. Protected inventories without proposals. Managed permits proposals, but never bypasses Active Management.</p>
+                <div class="control-group"><h4>Management mode</h4><p>Ignored excludes this instance. Protected blocks automated proposals but allows confirmed Manual Management when Active Management is on. Managed also permits automated proposals.</p>
                   <form method="post" action="/integrations/{{ integration.id }}/management-mode" class="inline-form">
                     <input type="hidden" name="csrf" value="{{ csrf_token }}">
                     <label>Mode<select name="management_mode"><option value="IGNORED" {% if integration.management_mode == "IGNORED" %}selected{% endif %}>Ignored</option><option value="PROTECTED" {% if integration.management_mode == "PROTECTED" %}selected{% endif %}>Protected</option><option value="MANAGED" {% if integration.management_mode == "MANAGED" %}selected{% endif %}>Managed</option></select></label>
@@ -239,19 +239,20 @@
                 {% endif %}
 
                 {% if integration.kind in ("RADARR", "SONARR", "QBITTORRENT") %}
-                <div class="control-group active-gate"><h4>Active Management</h4><p>This is the destructive-action gate. It is independent from connector enablement and management mode.</p>
+                <div class="control-group active-gate"><h4>Active Management</h4><p>Allows confirmed destructive actions. Protected mode still blocks automated proposals.</p>
                   {% if integration.active_management_enabled %}
                   <form method="post" action="/integrations/{{ integration.id }}/active-management">
                     <input type="hidden" name="csrf" value="{{ csrf_token }}">
                     <button class="button button-secondary" type="submit">Disable Active Management</button>
                     <small class="gate-note">Disabling stops destructive execution before its next step and invalidates queued approvals.</small>
                   </form>
+                  {% elif integration.kind in ('RADARR', 'SONARR') and integration.management_mode == 'IGNORED' %}
+                  <p class="empty-inline">Set this instance to Protected or Managed before enabling destructive actions.</p>
                   {% elif rollout_policy.mode == 'APPROVAL_REQUIRED' %}
                   <form method="post" action="/integrations/{{ integration.id }}/active-management">
                     <input type="hidden" name="csrf" value="{{ csrf_token }}">
-                    <label class="confirmation-check"><input type="checkbox" name="confirm_active" value="yes"><span><strong>Confirm Active Management</strong><small>{% if integration.kind == 'QBITTORRENT' %}Approved jobs may remove mapped torrents and their torrent-side data after Radarr succeeds.{% elif integration.kind == 'RADARR' %}Approved jobs may remove a movie and its library files through this Radarr instance.{% else %}Television execution is not available in this rollout.{% endif %}</small></span></label>
-                    <button class="button button-danger" type="submit" {% if integration.kind == 'SONARR' %}disabled aria-describedby="sonarr-management-note-{{ integration.id }}"{% endif %}>Enable Active Management</button>
-                    {% if integration.kind == 'SONARR' %}<small id="sonarr-management-note-{{ integration.id }}" class="gate-note">Sonarr remains read-only while movie approval is tested.</small>{% endif %}
+                    <label class="confirmation-check"><input type="checkbox" name="confirm_active" value="yes"><span><strong>Confirm Active Management</strong><small>{% if integration.kind == 'QBITTORRENT' %}Approved jobs may remove mapped torrents and their torrent-side data after Radarr succeeds.{% elif integration.kind == 'RADARR' %}Manual Management may remove selected movies and files. Managed mode may also execute approved deletion jobs.{% else %}Manual Management may remove selected season files and unmonitor those seasons.{% endif %}</small></span></label>
+                    <button class="button button-danger" type="submit">Enable Active Management</button>
                   </form>
                   {% else %}<p class="empty-inline">Available after the global rollout reaches Approval Required.</p>{% endif %}
                 </div>
