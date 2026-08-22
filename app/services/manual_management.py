@@ -38,6 +38,7 @@ from app.services.inventory import source_is_fresh
 from app.services.rollout import get_rollout_policy
 
 TRACKER_FILTERS = {"ALL", "MET", "NOT_MET"}
+WATCH_FILTERS = {"ALL", "WATCHED", "NEVER_WATCHED"}
 PAGE_SIZE = 25
 
 
@@ -69,6 +70,7 @@ class ManualGroup:
     media_type: str
     year: int | None
     total_size: int
+    meaningfully_watched_count: int
     candidates: list[ManualCandidate]
 
 
@@ -79,6 +81,7 @@ class ManualManagementPage:
     selected_requester: RequesterProfile | None
     selected_integration: IntegrationInstance | None
     tracker_filter: str
+    watch_filter: str
     groups: list[ManualGroup]
     total_groups: int
     total_items: int
@@ -198,6 +201,7 @@ def _matching_candidates(
     profile: RequesterProfile,
     integration: IntegrationInstance,
     tracker_filter: str,
+    watch_filter: str,
 ) -> list[ManualCandidate]:
     movie_dates, series_dates = _request_keys(session, profile)
     if integration.kind == "RADARR" and not movie_dates:
@@ -224,6 +228,10 @@ def _matching_candidates(
             MediaIdentity.media_type == "SEASON",
             MediaIdentity.series_tvdb_id.in_(set(series_dates)),
         )
+    if watch_filter == "WATCHED":
+        query = query.where(MediaLifecycle.last_meaningful_watch_at.is_not(None))
+    elif watch_filter == "NEVER_WATCHED":
+        query = query.where(MediaLifecycle.last_meaningful_watch_at.is_(None))
 
     candidates: list[ManualCandidate] = []
     for lifecycle, identity in session.execute(query).all():
@@ -267,6 +275,9 @@ def _groups(candidates: list[ManualCandidate]) -> list[ManualGroup]:
                 media_type,
                 first.identity.year,
                 sum(item.lifecycle.current_size or 0 for item in items),
+                sum(
+                    item.lifecycle.last_meaningful_watch_at is not None for item in items
+                ),
                 items,
             )
         )
@@ -279,6 +290,7 @@ def build_manual_management_page(
     requester_profile_id: str = "",
     integration_id: str = "",
     tracker_filter: str = "ALL",
+    watch_filter: str = "ALL",
     page: int = 1,
 ) -> ManualManagementPage:
     requesters = session.scalars(
@@ -296,9 +308,12 @@ def build_manual_management_page(
     ).all()
     selected_requester = session.get(RequesterProfile, requester_profile_id)
     selected_integration = session.get(IntegrationInstance, integration_id)
-    normalized_filter = tracker_filter.upper()
-    if normalized_filter not in TRACKER_FILTERS:
-        normalized_filter = "ALL"
+    normalized_tracker_filter = tracker_filter.upper()
+    if normalized_tracker_filter not in TRACKER_FILTERS:
+        normalized_tracker_filter = "ALL"
+    normalized_watch_filter = watch_filter.upper()
+    if normalized_watch_filter not in WATCH_FILTERS:
+        normalized_watch_filter = "ALL"
     candidates: list[ManualCandidate] = []
     if (
         selected_requester is not None
@@ -306,7 +321,11 @@ def build_manual_management_page(
         and selected_integration.kind in {"RADARR", "SONARR"}
     ):
         candidates = _matching_candidates(
-            session, selected_requester, selected_integration, normalized_filter
+            session,
+            selected_requester,
+            selected_integration,
+            normalized_tracker_filter,
+            normalized_watch_filter,
         )
     all_groups = _groups(candidates)
     total_groups = len(all_groups)
@@ -318,7 +337,8 @@ def build_manual_management_page(
         integrations=integrations,
         selected_requester=selected_requester,
         selected_integration=selected_integration,
-        tracker_filter=normalized_filter,
+        tracker_filter=normalized_tracker_filter,
+        watch_filter=normalized_watch_filter,
         groups=all_groups[start : start + PAGE_SIZE],
         total_groups=total_groups,
         total_items=len(candidates),
@@ -333,6 +353,7 @@ def resolve_manual_selection(
     requester_profile_id: str,
     integration_id: str,
     tracker_filter: str,
+    watch_filter: str,
     lifecycle_ids: list[str],
     select_all_filtered: bool,
 ) -> tuple[RequesterProfile, IntegrationInstance, list[ManualCandidate]]:
@@ -342,10 +363,19 @@ def resolve_manual_selection(
         raise ManualManagementError("Choose an Overseerr user.")
     if integration is None or integration.kind not in {"RADARR", "SONARR"}:
         raise ManualManagementError("Choose a Radarr or Sonarr instance.")
-    normalized_filter = tracker_filter.upper()
-    if normalized_filter not in TRACKER_FILTERS:
+    normalized_tracker_filter = tracker_filter.upper()
+    if normalized_tracker_filter not in TRACKER_FILTERS:
         raise ManualManagementError("Choose a valid tracker condition filter.")
-    candidates = _matching_candidates(session, profile, integration, normalized_filter)
+    normalized_watch_filter = watch_filter.upper()
+    if normalized_watch_filter not in WATCH_FILTERS:
+        raise ManualManagementError("Choose a valid meaningful watch filter.")
+    candidates = _matching_candidates(
+        session,
+        profile,
+        integration,
+        normalized_tracker_filter,
+        normalized_watch_filter,
+    )
     by_id = {candidate.lifecycle.id: candidate for candidate in candidates}
     if select_all_filtered:
         selected = candidates

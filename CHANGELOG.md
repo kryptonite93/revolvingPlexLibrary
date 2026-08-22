@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added meaningful-watch filtering and watch evidence to Manual Management for movies and individual seasons.
 - Added requester-based Manual Management across Radarr and Sonarr, with cross-instance provider matching, selectable season dropdowns, one-step batch confirmation, live safety revalidation, and optional Radarr import exclusions.
 - Added Tautulli usernames to meaningful playback evidence and backfilled stored playback rows during synchronization.
 - Fixed Plex reconciliation when a successful library refresh returns an empty response.

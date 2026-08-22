@@ -137,6 +137,7 @@ def test_manual_management_links_one_requester_into_other_arr_instances(client, 
                     arr_item_id=44,
                     state="ACTIVE",
                     current_size=10_000,
+                    last_meaningful_watch_at=datetime(2026, 1, 2, tzinfo=UTC),
                     protection_state="PROTECTED",
                     protection_sources=["MANUAL_SELECTION"],
                 ),
@@ -146,6 +147,7 @@ def test_manual_management_links_one_requester_into_other_arr_instances(client, 
                     arr_item_id=7,
                     state="ACTIVE",
                     current_size=20_000,
+                    last_meaningful_watch_at=datetime(2026, 2, 3, tzinfo=UTC),
                 ),
                 MediaLifecycle(
                     identity_id=season_two.id,
@@ -169,6 +171,8 @@ def test_manual_management_links_one_requester_into_other_arr_instances(client, 
     assert "Cross Instance Movie" in movie_page.text
     assert "Radarr 4K" in movie_page.text
     assert "Protected" in movie_page.text
+    assert "Meaningful watch" in movie_page.text
+    assert "All watch history" in movie_page.text
     assert "Add movies to this Radarr instance’s exclusion list" in movie_page.text
 
     television_page = client.get(
@@ -180,6 +184,34 @@ def test_manual_management_links_one_requester_into_other_arr_instances(client, 
     assert "Season 1" in television_page.text
     assert "Season 2" in television_page.text
     assert "Season exclusions are unavailable" in television_page.text
+
+    watched_page = client.get(
+        "/manual-management",
+        params={
+            "requester": requester_id,
+            "instance": sonarr_id,
+            "tracker": "ALL",
+            "watch": "WATCHED",
+        },
+    )
+    assert watched_page.status_code == 200
+    assert "Season 1" in watched_page.text
+    assert "Season 2" not in watched_page.text
+    assert '<option value="WATCHED" selected>Meaningfully watched</option>' in watched_page.text
+
+    never_watched_page = client.get(
+        "/manual-management",
+        params={
+            "requester": requester_id,
+            "instance": sonarr_id,
+            "tracker": "ALL",
+            "watch": "NEVER_WATCHED",
+        },
+    )
+    assert never_watched_page.status_code == 200
+    assert "Season 1" not in never_watched_page.text
+    assert "Season 2" in never_watched_page.text
+    assert "Never meaningfully watched" in never_watched_page.text
 
 
 def test_coordinator_conflict_leaves_a_visible_batch_retry(client, app, monkeypatch) -> None:
@@ -485,6 +517,7 @@ def test_manual_sonarr_batch_deletes_one_season_and_unmonitors_it(
             requester_profile_id=requester.id,
             integration_id=sonarr.id,
             tracker_filter="ALL",
+            watch_filter="ALL",
             lifecycle_ids=[lifecycle.id],
             select_all_filtered=False,
         )
