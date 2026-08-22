@@ -83,7 +83,7 @@
       </div>
 
       {% if manual_page.groups %}
-      <form class="manual-deletion-form" method="post" action="/manual-management/execute" data-manual-management-form data-filtered-count="{{ manual_page.total_items }}" data-filtered-size="{{ manual_page.total_size }}">
+      <form class="manual-deletion-form" method="post" action="/manual-management/execute" data-manual-management-form data-filtered-count="{{ manual_page.total_items }}" data-filtered-size="{{ manual_page.total_size }}" data-selection-key="{{ manual_page.selected_requester.id }}:{{ manual_page.selected_integration.id }}:{{ manual_page.tracker_filter }}:{{ manual_page.watch_filter }}:{{ manual_page.sort_field }}:{{ manual_page.sort_direction }}">
         <input type="hidden" name="csrf" value="{{ csrf_token }}">
         <input type="hidden" name="requester_profile_id" value="{{ manual_page.selected_requester.id }}">
         <input type="hidden" name="integration_id" value="{{ manual_page.selected_integration.id }}">
@@ -93,7 +93,7 @@
         <input type="hidden" name="sort_direction" value="{{ manual_page.sort_direction }}">
 
         <div class="manual-selection-bar">
-          <label class="filtered-selection"><input type="checkbox" name="select_all_filtered" value="yes" data-manual-select-all><span><strong>Select all {{ manual_page.total_items }} filtered {{ 'item' if manual_page.total_items == 1 else 'items' }}</strong><small>Includes results on every page.</small></span></label>
+          <label class="filtered-selection"><input type="checkbox" name="select_all_filtered" value="yes" data-manual-select-all><span><strong>Select all {{ manual_page.total_items }} filtered {{ 'item' if manual_page.total_items == 1 else 'items' }}</strong><small>Selects every page; uncheck any exceptions.</small></span></label>
           <span class="selection-status" data-manual-selection-status role="status" aria-live="polite">No items selected</span>
           <button class="button button-danger" type="button" data-manual-review disabled>Review deletion</button>
         </div>

@@ -413,6 +413,7 @@ def resolve_manual_selection(
     tracker_filter: str,
     watch_filter: str,
     lifecycle_ids: list[str],
+    excluded_lifecycle_ids: list[str],
     select_all_filtered: bool,
 ) -> tuple[RequesterProfile, IntegrationInstance, list[ManualCandidate]]:
     profile = session.get(RequesterProfile, requester_profile_id)
@@ -436,7 +437,16 @@ def resolve_manual_selection(
     )
     by_id = {candidate.lifecycle.id: candidate for candidate in candidates}
     if select_all_filtered:
-        selected = candidates
+        excluded_ids = set(excluded_lifecycle_ids)
+        if not excluded_ids.issubset(by_id):
+            raise ManualManagementError(
+                "One or more excluded items no longer match the current user and filters."
+            )
+        selected = [
+            candidate
+            for candidate in candidates
+            if candidate.lifecycle.id not in excluded_ids
+        ]
     else:
         requested_ids = set(lifecycle_ids)
         if not requested_ids:

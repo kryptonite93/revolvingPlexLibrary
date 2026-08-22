@@ -764,6 +764,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         sort_field: str = Form("NAME"),
         sort_direction: str = Form("ASC"),
         lifecycle_ids: list[str] = Form(default=[]),
+        excluded_lifecycle_ids: list[str] = Form(default=[]),
         select_all_filtered: str | None = Form(None),
         add_import_exclusion: str | None = Form(None),
         acknowledge: str | None = Form(None),
@@ -791,6 +792,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 tracker_filter=tracker_filter,
                 watch_filter=watch_filter,
                 lifecycle_ids=lifecycle_ids,
+                excluded_lifecycle_ids=excluded_lifecycle_ids,
                 select_all_filtered=select_all_filtered == "yes",
             )
             batch = create_manual_batch(

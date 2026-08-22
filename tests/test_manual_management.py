@@ -188,6 +188,10 @@ def test_manual_management_links_one_requester_into_other_arr_instances(client, 
         requester_id = requester.id
         radarr_id = radarr_4k.id
         sonarr_id = sonarr.id
+        older_lifecycle_id = session.scalar(
+            select(MediaLifecycle.id).where(MediaLifecycle.identity_id == older_movie.id)
+        )
+        assert older_lifecycle_id is not None
 
     movie_page = client.get(
         "/manual-management",
@@ -202,6 +206,21 @@ def test_manual_management_links_one_requester_into_other_arr_instances(client, 
     assert "All watch history" in movie_page.text
     assert 'data-filtered-size="50000"' in movie_page.text
     assert "Add movies to this Radarr instance’s exclusion list" in movie_page.text
+
+    with app.state.database.session_factory() as session:
+        _profile, _target, selected = resolve_manual_selection(
+            session,
+            requester_profile_id=requester_id,
+            integration_id=radarr_id,
+            tracker_filter="ALL",
+            watch_filter="ALL",
+            lifecycle_ids=[],
+            excluded_lifecycle_ids=[older_lifecycle_id],
+            select_all_filtered=True,
+        )
+        assert [candidate.identity.canonical_title for candidate in selected] == [
+            "Cross Instance Movie"
+        ]
 
     size_sorted_page = client.get(
         "/manual-management",
@@ -627,6 +646,7 @@ def test_manual_sonarr_batch_deletes_one_season_and_unmonitors_it(
             tracker_filter="ALL",
             watch_filter="ALL",
             lifecycle_ids=[lifecycle.id],
+            excluded_lifecycle_ids=[],
             select_all_filtered=False,
         )
         batch = create_manual_batch(

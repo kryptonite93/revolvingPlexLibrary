@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Changed Manual Management’s filtered selection into a select-all-except workflow with editable checkboxes and cross-page exclusions.
 - Added Overseerr request date as a Manual Management sorting option.
 - Added ascending and descending Manual Management sorting by name, last meaningful watch, release date, or size.
 - Added selected storage totals beside the selected-item count in Manual Management, including all filtered pages.
