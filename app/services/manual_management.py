@@ -39,6 +39,8 @@ from app.services.rollout import get_rollout_policy
 
 TRACKER_FILTERS = {"ALL", "MET", "NOT_MET"}
 WATCH_FILTERS = {"ALL", "WATCHED", "NEVER_WATCHED"}
+SORT_FIELDS = {"NAME", "LAST_WATCHED", "RELEASE_DATE", "SIZE"}
+SORT_DIRECTIONS = {"ASC", "DESC"}
 PAGE_SIZE = 25
 
 
@@ -82,9 +84,12 @@ class ManualManagementPage:
     selected_integration: IntegrationInstance | None
     tracker_filter: str
     watch_filter: str
+    sort_field: str
+    sort_direction: str
     groups: list[ManualGroup]
     total_groups: int
     total_items: int
+    total_size: int
     page: int
     total_pages: int
 
@@ -284,6 +289,38 @@ def _groups(candidates: list[ManualCandidate]) -> list[ManualGroup]:
     return sorted(groups, key=lambda group: group.title.casefold())
 
 
+def _sort_groups(
+    groups: list[ManualGroup], sort_field: str, sort_direction: str
+) -> list[ManualGroup]:
+    if sort_field == "NAME":
+        return sorted(
+            groups,
+            key=lambda group: group.title.casefold(),
+            reverse=sort_direction == "DESC",
+        )
+
+    def value(group: ManualGroup) -> float | int | None:
+        if sort_field == "SIZE":
+            return group.total_size
+        if sort_field == "RELEASE_DATE":
+            return group.year
+        watched = [
+            candidate.lifecycle.last_meaningful_watch_at
+            for candidate in group.candidates
+            if candidate.lifecycle.last_meaningful_watch_at is not None
+        ]
+        if not watched:
+            return None
+        latest = max(watched)
+        return latest.timestamp()
+
+    known = [group for group in groups if value(group) is not None]
+    unknown = [group for group in groups if value(group) is None]
+    known.sort(key=lambda group: value(group) or 0, reverse=sort_direction == "DESC")
+    unknown.sort(key=lambda group: group.title.casefold())
+    return known + unknown
+
+
 def build_manual_management_page(
     session: Session,
     *,
@@ -291,6 +328,8 @@ def build_manual_management_page(
     integration_id: str = "",
     tracker_filter: str = "ALL",
     watch_filter: str = "ALL",
+    sort_field: str = "NAME",
+    sort_direction: str = "ASC",
     page: int = 1,
 ) -> ManualManagementPage:
     requesters = session.scalars(
@@ -314,6 +353,12 @@ def build_manual_management_page(
     normalized_watch_filter = watch_filter.upper()
     if normalized_watch_filter not in WATCH_FILTERS:
         normalized_watch_filter = "ALL"
+    normalized_sort_field = sort_field.upper()
+    if normalized_sort_field not in SORT_FIELDS:
+        normalized_sort_field = "NAME"
+    normalized_sort_direction = sort_direction.upper()
+    if normalized_sort_direction not in SORT_DIRECTIONS:
+        normalized_sort_direction = "ASC"
     candidates: list[ManualCandidate] = []
     if (
         selected_requester is not None
@@ -327,7 +372,9 @@ def build_manual_management_page(
             normalized_tracker_filter,
             normalized_watch_filter,
         )
-    all_groups = _groups(candidates)
+    all_groups = _sort_groups(
+        _groups(candidates), normalized_sort_field, normalized_sort_direction
+    )
     total_groups = len(all_groups)
     total_pages = max(1, (total_groups + PAGE_SIZE - 1) // PAGE_SIZE)
     current_page = min(max(1, page), total_pages)
@@ -339,9 +386,12 @@ def build_manual_management_page(
         selected_integration=selected_integration,
         tracker_filter=normalized_tracker_filter,
         watch_filter=normalized_watch_filter,
+        sort_field=normalized_sort_field,
+        sort_direction=normalized_sort_direction,
         groups=all_groups[start : start + PAGE_SIZE],
         total_groups=total_groups,
         total_items=len(candidates),
+        total_size=sum(candidate.lifecycle.current_size or 0 for candidate in candidates),
         page=current_page,
         total_pages=total_pages,
     )

@@ -58,6 +58,20 @@
             <option value="NEVER_WATCHED" {% if manual_page.watch_filter == 'NEVER_WATCHED' %}selected{% endif %}>Never meaningfully watched</option>
           </select>
         </label>
+        <label>Sort by
+          <select name="sort">
+            <option value="NAME" {% if manual_page.sort_field == 'NAME' %}selected{% endif %}>Name</option>
+            <option value="LAST_WATCHED" {% if manual_page.sort_field == 'LAST_WATCHED' %}selected{% endif %}>Last watched</option>
+            <option value="RELEASE_DATE" {% if manual_page.sort_field == 'RELEASE_DATE' %}selected{% endif %}>Release date</option>
+            <option value="SIZE" {% if manual_page.sort_field == 'SIZE' %}selected{% endif %}>Size</option>
+          </select>
+        </label>
+        <label>Direction
+          <select name="direction">
+            <option value="ASC" {% if manual_page.sort_direction == 'ASC' %}selected{% endif %}>Ascending</option>
+            <option value="DESC" {% if manual_page.sort_direction == 'DESC' %}selected{% endif %}>Descending</option>
+          </select>
+        </label>
         <button class="button button-primary" type="submit">Show requested media</button>
       </form>
 
@@ -68,12 +82,14 @@
       </div>
 
       {% if manual_page.groups %}
-      <form class="manual-deletion-form" method="post" action="/manual-management/execute" data-manual-management-form data-filtered-count="{{ manual_page.total_items }}">
+      <form class="manual-deletion-form" method="post" action="/manual-management/execute" data-manual-management-form data-filtered-count="{{ manual_page.total_items }}" data-filtered-size="{{ manual_page.total_size }}">
         <input type="hidden" name="csrf" value="{{ csrf_token }}">
         <input type="hidden" name="requester_profile_id" value="{{ manual_page.selected_requester.id }}">
         <input type="hidden" name="integration_id" value="{{ manual_page.selected_integration.id }}">
         <input type="hidden" name="tracker_filter" value="{{ manual_page.tracker_filter }}">
         <input type="hidden" name="watch_filter" value="{{ manual_page.watch_filter }}">
+        <input type="hidden" name="sort_field" value="{{ manual_page.sort_field }}">
+        <input type="hidden" name="sort_direction" value="{{ manual_page.sort_direction }}">
 
         <div class="manual-selection-bar">
           <label class="filtered-selection"><input type="checkbox" name="select_all_filtered" value="yes" data-manual-select-all><span><strong>Select all {{ manual_page.total_items }} filtered {{ 'item' if manual_page.total_items == 1 else 'items' }}</strong><small>Includes results on every page.</small></span></label>
@@ -86,7 +102,7 @@
             {% if group.media_type == 'MOVIE' %}
             {% set candidate = group.candidates[0] %}
             <article class="manual-media-row">
-              <label class="manual-row-select"><input type="checkbox" name="lifecycle_ids" value="{{ candidate.lifecycle.id }}" data-manual-item aria-label="Select {{ group.title }}"></label>
+              <label class="manual-row-select"><input type="checkbox" name="lifecycle_ids" value="{{ candidate.lifecycle.id }}" data-manual-item data-size="{{ candidate.lifecycle.current_size or 0 }}" aria-label="Select {{ group.title }}"></label>
               <a class="manual-media-identity" href="/media/{{ candidate.lifecycle.id }}"><span class="media-spine media-spine-movie" aria-hidden="true">M</span><span><strong>{{ group.title }}</strong><small>{{ candidate.integration.name }} · Movie{% if group.year %} · {{ group.year }}{% endif %}</small></span></a>
               <span class="manual-context"><strong>{{ ((candidate.lifecycle.current_size or 0) / 1073741824)|round(2) }} GiB</strong><small>{% if candidate.lifecycle.last_meaningful_watch_at %}Meaningful watch {{ format_date(candidate.lifecycle.last_meaningful_watch_at) }}{% else %}Never meaningfully watched{% endif %}</small><small>{% if candidate.requested_at %}Requested {{ format_date(candidate.requested_at) }}{% else %}Request date unavailable{% endif %}</small>{% if candidate.lifecycle.protection_state == 'PROTECTED' %}<em>Protected</em>{% endif %}</span>
               <span class="manual-tracker-state manual-tracker-{{ candidate.tracker.state|lower }}"><strong>{{ candidate.tracker.label }}</strong><small>{{ candidate.tracker.reason }}</small></span>
@@ -102,7 +118,7 @@
               <div class="manual-season-list">
                 {% for candidate in group.candidates %}
                 <article class="manual-media-row manual-season-row">
-                  <label class="manual-row-select"><input type="checkbox" name="lifecycle_ids" value="{{ candidate.lifecycle.id }}" data-manual-item data-series-key="{{ group.key }}" aria-label="Select {{ candidate.identity.canonical_title }}"></label>
+                  <label class="manual-row-select"><input type="checkbox" name="lifecycle_ids" value="{{ candidate.lifecycle.id }}" data-manual-item data-size="{{ candidate.lifecycle.current_size or 0 }}" data-series-key="{{ group.key }}" aria-label="Select {{ candidate.identity.canonical_title }}"></label>
                   <a class="manual-media-identity" href="/media/{{ candidate.lifecycle.id }}"><span class="media-spine media-spine-season" aria-hidden="true">{% if candidate.identity.season_number == 0 %}SP{% else %}S{{ candidate.identity.season_number }}{% endif %}</span><span><strong>{% if candidate.identity.season_number == 0 %}Specials{% else %}Season {{ candidate.identity.season_number }}{% endif %}</strong><small>{{ group.title }} · {{ candidate.integration.name }}</small></span></a>
                   <span class="manual-context"><strong>{{ ((candidate.lifecycle.current_size or 0) / 1073741824)|round(2) }} GiB</strong><small>{% if candidate.lifecycle.last_meaningful_watch_at %}Meaningful watch {{ format_date(candidate.lifecycle.last_meaningful_watch_at) }}{% else %}Never meaningfully watched{% endif %}</small><small>{% if candidate.requested_at %}Requested {{ format_date(candidate.requested_at) }}{% else %}Request date unavailable{% endif %}</small>{% if candidate.lifecycle.protection_state == 'PROTECTED' %}<em>Protected</em>{% endif %}</span>
                   <span class="manual-tracker-state manual-tracker-{{ candidate.tracker.state|lower }}"><strong>{{ candidate.tracker.label }}</strong><small>{{ candidate.tracker.reason }}</small></span>
@@ -128,7 +144,7 @@
       </form>
 
       {% if manual_page.total_pages > 1 %}
-      <nav class="workbench-pagination" aria-label="Manual Management pages"><span>Page {{ manual_page.page }} of {{ manual_page.total_pages }}</span><div>{% if manual_page.page > 1 %}<a class="button button-secondary compact-action" href="/manual-management?requester={{ manual_page.selected_requester.id }}&instance={{ manual_page.selected_integration.id }}&tracker={{ manual_page.tracker_filter }}&watch={{ manual_page.watch_filter }}&page={{ manual_page.page - 1 }}">Previous</a>{% endif %}{% if manual_page.page < manual_page.total_pages %}<a class="button button-secondary compact-action" href="/manual-management?requester={{ manual_page.selected_requester.id }}&instance={{ manual_page.selected_integration.id }}&tracker={{ manual_page.tracker_filter }}&watch={{ manual_page.watch_filter }}&page={{ manual_page.page + 1 }}">Next</a>{% endif %}</div></nav>
+      <nav class="workbench-pagination" aria-label="Manual Management pages"><span>Page {{ manual_page.page }} of {{ manual_page.total_pages }}</span><div>{% if manual_page.page > 1 %}<a class="button button-secondary compact-action" href="/manual-management?requester={{ manual_page.selected_requester.id }}&instance={{ manual_page.selected_integration.id }}&tracker={{ manual_page.tracker_filter }}&watch={{ manual_page.watch_filter }}&sort={{ manual_page.sort_field }}&direction={{ manual_page.sort_direction }}&page={{ manual_page.page - 1 }}">Previous</a>{% endif %}{% if manual_page.page < manual_page.total_pages %}<a class="button button-secondary compact-action" href="/manual-management?requester={{ manual_page.selected_requester.id }}&instance={{ manual_page.selected_integration.id }}&tracker={{ manual_page.tracker_filter }}&watch={{ manual_page.watch_filter }}&sort={{ manual_page.sort_field }}&direction={{ manual_page.sort_direction }}&page={{ manual_page.page + 1 }}">Next</a>{% endif %}</div></nav>
       {% endif %}
       {% else %}
       <div class="empty-state manual-empty"><h3>No downloaded media matches</h3><p>This requester has no downloaded titles in the chosen instance under the current tracker and meaningful-watch filters. Try All conditions and All watch history, or synchronize Overseerr and the Arr instance.</p></div>

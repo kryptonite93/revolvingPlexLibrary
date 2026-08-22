@@ -383,6 +383,8 @@ def _manual_management_redirect(
     integration_id: str = "",
     tracker_filter: str = "ALL",
     watch_filter: str = "ALL",
+    sort_field: str = "NAME",
+    sort_direction: str = "ASC",
     batch_id: str = "",
     message: str | None = None,
     error: str | None = None,
@@ -392,6 +394,8 @@ def _manual_management_redirect(
         "instance": integration_id,
         "tracker": tracker_filter,
         "watch": watch_filter,
+        "sort": sort_field,
+        "direction": sort_direction,
     }
     if batch_id:
         query["batch"] = batch_id
@@ -716,6 +720,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         instance: str = Query(""),
         tracker: str = Query("ALL"),
         watch: str = Query("ALL"),
+        sort: str = Query("NAME"),
+        direction: str = Query("ASC"),
         page: int = Query(1, ge=1),
         batch: str = Query(""),
         message: str | None = None,
@@ -729,6 +735,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             integration_id=instance,
             tracker_filter=tracker,
             watch_filter=watch,
+            sort_field=sort,
+            sort_direction=direction,
             page=page,
         )
         result = batch_results(session, batch) if batch else None
@@ -753,6 +761,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         integration_id: str = Form(),
         tracker_filter: str = Form("ALL"),
         watch_filter: str = Form("ALL"),
+        sort_field: str = Form("NAME"),
+        sort_direction: str = Form("ASC"),
         lifecycle_ids: list[str] = Form(default=[]),
         select_all_filtered: str | None = Form(None),
         add_import_exclusion: str | None = Form(None),
@@ -768,6 +778,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 integration_id=integration_id,
                 tracker_filter=tracker_filter,
                 watch_filter=watch_filter,
+                sort_field=sort_field,
+                sort_direction=sort_direction,
                 error="Confirm the selected library-file deletions before continuing.",
             )
         batch: ManualDeletionBatch | None = None
@@ -806,6 +818,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 integration_id=integration_id,
                 tracker_filter=tracker_filter,
                 watch_filter=watch_filter,
+                sort_field=sort_field,
+                sort_direction=sort_direction,
                 batch_id=batch.id if batch else "",
                 error="Another inventory or deletion operation is running. Retry this batch later.",
             )
@@ -816,6 +830,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 integration_id=integration_id,
                 tracker_filter=tracker_filter,
                 watch_filter=watch_filter,
+                sort_field=sort_field,
+                sort_direction=sort_direction,
                 error=str(validation_error),
             )
         assert batch is not None
@@ -827,6 +843,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             integration_id=integration_id,
             tracker_filter=tracker_filter,
             watch_filter=watch_filter,
+            sort_field=sort_field,
+            sort_direction=sort_direction,
             batch_id=batch.id,
             message=f"{summary}.",
         )

@@ -10,8 +10,19 @@ if (form) {
   const acknowledge = form.querySelector("[data-manual-acknowledge]");
   const execute = form.querySelector("[data-manual-execute]");
   const filteredCount = Number(form.dataset.filteredCount || 0);
+  const filteredSize = Number(form.dataset.filteredSize || 0);
 
   const selectedCount = () => selectAll.checked ? filteredCount : items.filter((item) => item.checked).length;
+  const selectedSize = () => selectAll.checked
+    ? filteredSize
+    : items.filter((item) => item.checked).reduce((total, item) => total + Number(item.dataset.size || 0), 0);
+  const formatSize = (bytes) => {
+    const gibibyte = 1024 ** 3;
+    const tebibyte = 1024 ** 4;
+    const divisor = bytes >= tebibyte ? tebibyte : gibibyte;
+    const unit = bytes >= tebibyte ? "TiB" : "GiB";
+    return `${(bytes / divisor).toLocaleString(undefined, { maximumFractionDigits: 2 })} ${unit}`;
+  };
 
   const updateSeriesCounts = () => {
     form.querySelectorAll(".manual-series-group").forEach((group) => {
@@ -26,9 +37,10 @@ if (form) {
 
   const update = () => {
     const total = selectedCount();
+    const size = selectedSize();
     form.classList.toggle("is-filtered-selection", selectAll.checked);
     items.forEach((item) => { item.disabled = selectAll.checked; });
-    status.textContent = total ? `${total} ${total === 1 ? "item" : "items"} selected` : "No items selected";
+    status.textContent = total ? `${total} ${total === 1 ? "item" : "items"} selected · ${formatSize(size)}` : "No items selected";
     review.disabled = total === 0;
     count.textContent = `${total} ${total === 1 ? "item" : "items"}`;
     updateSeriesCounts();

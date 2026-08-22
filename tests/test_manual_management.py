@@ -93,6 +93,13 @@ def test_manual_management_links_one_requester_into_other_arr_instances(client, 
             canonical_title="Cross Instance Movie",
             year=2026,
         )
+        older_movie = MediaIdentity(
+            media_type="MOVIE",
+            source_key="tmdb:322",
+            tmdb_id=322,
+            canonical_title="Zulu Older Movie",
+            year=2024,
+        )
         season_one = MediaIdentity(
             media_type="SEASON",
             source_key="tvdb:100:season:1",
@@ -109,7 +116,7 @@ def test_manual_management_links_one_requester_into_other_arr_instances(client, 
             season_number=2,
             canonical_title="Requested Show · Season 2",
         )
-        session.add_all([requester, movie, season_one, season_two])
+        session.add_all([requester, movie, older_movie, season_one, season_two])
         session.flush()
         session.add_all(
             [
@@ -118,6 +125,15 @@ def test_manual_management_links_one_requester_into_other_arr_instances(client, 
                     external_request_id=1,
                     media_type="movie",
                     tmdb_id=321,
+                    status="2",
+                    requester_id="9",
+                    present=True,
+                ),
+                RequestRecord(
+                    integration_id=overseerr.id,
+                    external_request_id=3,
+                    media_type="movie",
+                    tmdb_id=322,
                     status="2",
                     requester_id="9",
                     present=True,
@@ -140,6 +156,14 @@ def test_manual_management_links_one_requester_into_other_arr_instances(client, 
                     last_meaningful_watch_at=datetime(2026, 1, 2, tzinfo=UTC),
                     protection_state="PROTECTED",
                     protection_sources=["MANUAL_SELECTION"],
+                ),
+                MediaLifecycle(
+                    identity_id=older_movie.id,
+                    integration_id=radarr_4k.id,
+                    arr_item_id=45,
+                    state="ACTIVE",
+                    current_size=40_000,
+                    last_meaningful_watch_at=datetime(2025, 12, 1, tzinfo=UTC),
                 ),
                 MediaLifecycle(
                     identity_id=season_one.id,
@@ -169,11 +193,72 @@ def test_manual_management_links_one_requester_into_other_arr_instances(client, 
     )
     assert movie_page.status_code == 200
     assert "Cross Instance Movie" in movie_page.text
+    assert "Zulu Older Movie" in movie_page.text
     assert "Radarr 4K" in movie_page.text
     assert "Protected" in movie_page.text
     assert "Meaningful watch" in movie_page.text
     assert "All watch history" in movie_page.text
+    assert 'data-filtered-size="50000"' in movie_page.text
     assert "Add movies to this Radarr instance’s exclusion list" in movie_page.text
+
+    size_sorted_page = client.get(
+        "/manual-management",
+        params={
+            "requester": requester_id,
+            "instance": radarr_id,
+            "sort": "SIZE",
+            "direction": "DESC",
+        },
+    )
+    assert size_sorted_page.status_code == 200
+    assert size_sorted_page.text.index("Zulu Older Movie") < size_sorted_page.text.index(
+        "Cross Instance Movie"
+    )
+    assert '<option value="SIZE" selected>Size</option>' in size_sorted_page.text
+    assert '<option value="DESC" selected>Descending</option>' in size_sorted_page.text
+
+    name_sorted_page = client.get(
+        "/manual-management",
+        params={
+            "requester": requester_id,
+            "instance": radarr_id,
+            "sort": "NAME",
+            "direction": "ASC",
+        },
+    )
+    assert name_sorted_page.text.index("Cross Instance Movie") < name_sorted_page.text.index(
+        "Zulu Older Movie"
+    )
+
+    release_sorted_page = client.get(
+        "/manual-management",
+        params={
+            "requester": requester_id,
+            "instance": radarr_id,
+            "sort": "RELEASE_DATE",
+            "direction": "ASC",
+        },
+    )
+    assert release_sorted_page.text.index(
+        "Zulu Older Movie"
+    ) < release_sorted_page.text.index("Cross Instance Movie")
+
+    watched_sorted_page = client.get(
+        "/manual-management",
+        params={
+            "requester": requester_id,
+            "instance": radarr_id,
+            "sort": "LAST_WATCHED",
+            "direction": "DESC",
+        },
+    )
+    assert watched_sorted_page.text.index(
+        "Cross Instance Movie"
+    ) < watched_sorted_page.text.index("Zulu Older Movie")
+    assert (
+        '<option value="LAST_WATCHED" selected>Last watched</option>'
+        in watched_sorted_page.text
+    )
 
     television_page = client.get(
         "/manual-management",
@@ -184,6 +269,9 @@ def test_manual_management_links_one_requester_into_other_arr_instances(client, 
     assert "Season 1" in television_page.text
     assert "Season 2" in television_page.text
     assert "Season exclusions are unavailable" in television_page.text
+    assert 'data-filtered-size="50000"' in television_page.text
+    assert 'data-size="20000"' in television_page.text
+    assert 'data-size="30000"' in television_page.text
 
     watched_page = client.get(
         "/manual-management",
@@ -197,6 +285,7 @@ def test_manual_management_links_one_requester_into_other_arr_instances(client, 
     assert watched_page.status_code == 200
     assert "Season 1" in watched_page.text
     assert "Season 2" not in watched_page.text
+    assert 'data-filtered-size="20000"' in watched_page.text
     assert '<option value="WATCHED" selected>Meaningfully watched</option>' in watched_page.text
 
     never_watched_page = client.get(
