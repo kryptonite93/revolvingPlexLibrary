@@ -106,6 +106,29 @@ def test_tautulli_health_uses_read_only_info_command() -> None:
     assert result.version == "v2.15.3"
 
 
+def test_tautulli_lists_playback_user_names() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.params["cmd"] == "get_user_names"
+        return httpx.Response(
+            200,
+            json={
+                "response": {
+                    "result": "success",
+                    "message": None,
+                    "data": [{"user_id": 7, "friendly_name": "Viewer Name"}],
+                }
+            },
+        )
+
+    users = TautulliAdapter(
+        "http://tautulli:8181",
+        "secret",
+        client_factory=client_factory(handler),
+    ).user_names()
+
+    assert users == [{"user_id": 7, "friendly_name": "Viewer Name"}]
+
+
 def test_qbittorrent_api_key_authenticates_with_bearer_token() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.method == "GET"

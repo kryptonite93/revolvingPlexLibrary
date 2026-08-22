@@ -302,6 +302,7 @@ class Playback(Base):
     watched: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     meaningful: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     user_id: Mapped[str | None] = mapped_column(String(160))
+    user_name: Mapped[str | None] = mapped_column(String(200))
 
 
 class Torrent(Base):
@@ -445,6 +446,56 @@ class DeletionJob(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
     )
+
+
+class ManualDeletionBatch(Base):
+    __tablename__ = "manual_deletion_batch"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    correlation_id: Mapped[str] = mapped_column(String(36), nullable=False, unique=True, index=True)
+    requester_profile_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("requester_profile.id"), nullable=False, index=True
+    )
+    integration_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("integration_instance.id"), nullable=False, index=True
+    )
+    requested_by_admin_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("admin_user.id"), nullable=False
+    )
+    add_import_exclusion: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    state: Mapped[str] = mapped_column(String(32), nullable=False, default="PENDING", index=True)
+    total_items: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    completed_items: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    failed_items: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, index=True
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ManualDeletionItem(Base):
+    __tablename__ = "manual_deletion_item"
+    __table_args__ = (
+        UniqueConstraint("batch_id", "lifecycle_id", name="uq_manual_deletion_batch_lifecycle"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    batch_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("manual_deletion_batch.id"), nullable=False, index=True
+    )
+    lifecycle_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("media_lifecycle.id"), nullable=False, index=True
+    )
+    state: Mapped[str] = mapped_column(String(32), nullable=False, default="PENDING", index=True)
+    current_step: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="AWAITING_EXECUTION"
+    )
+    external_state: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    last_error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class RequesterProfile(Base):

@@ -123,7 +123,11 @@ def _hours(seconds: int | None) -> str:
 
 
 def _tracker_result(
-    torrent: Torrent, tracker: TorrentTracker, policy: TrackerPolicy | None
+    torrent: Torrent,
+    tracker: TorrentTracker,
+    policy: TrackerPolicy | None,
+    *,
+    require_automatic_permission: bool = True,
 ) -> tuple[bool, str, str, dict[str, object]]:
     domain = normalize_tracker_domain(tracker.host)
     evidence: dict[str, object] = {
@@ -206,7 +210,7 @@ def _tracker_result(
             f"{_hours(policy.grace_period_seconds)}",
             evidence,
         )
-    if not policy.automatic_deletion_allowed:
+    if require_automatic_permission and not policy.automatic_deletion_allowed:
         return (
             False,
             "TRACKER_AUTOMATION_DISABLED",

@@ -520,6 +520,12 @@ def sync_tautulli(
         credentials,
         start_offset=start_offset,
     )
+    adapter = TautulliAdapter(integration.base_url, credentials["api_key"])
+    user_names = {
+        str(item.get("user_id")): str(item.get("friendly_name") or "").strip()
+        for item in adapter.user_names()
+        if item.get("user_id") is not None and str(item.get("friendly_name") or "").strip()
+    }
     count = 0
     for row in rows:
         external_id = str(row.get("row_id") or row.get("id") or "")
@@ -557,7 +563,17 @@ def sync_tautulli(
             percent=policy.meaningful_percent,
         )
         playback.user_id = str(row.get("user_id") or "") or None
+        playback.user_name = (
+            str(row.get("friendly_name") or row.get("user") or "").strip()
+            or user_names.get(playback.user_id or "")
+        )
         count += 1
+    session.flush()
+    for playback in session.scalars(
+        select(Playback).where(Playback.integration_id == integration.id)
+    ):
+        if playback.user_id and user_names.get(playback.user_id):
+            playback.user_name = user_names[playback.user_id]
     _apply_playback(session, policy)
     return {"new_playbacks": count, "cursor": final_offset}
 

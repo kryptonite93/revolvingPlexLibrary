@@ -63,6 +63,23 @@ class ArrAdapter:
             raise ValueError("Radarr returned invalid movie data")
         return payload
 
+    def series(self, series_id: int) -> dict[str, Any] | None:
+        try:
+            payload = self.get_json(f"/api/v3/series/{series_id}")
+        except httpx.HTTPStatusError as error:
+            if error.response.status_code == 404:
+                return None
+            raise
+        if not isinstance(payload, dict):
+            raise ValueError("Sonarr returned invalid series data")
+        return payload
+
+    def episode_files(self, series_id: int) -> list[dict[str, Any]]:
+        payload = self.get_json("/api/v3/episodefile", {"seriesId": series_id})
+        if not isinstance(payload, list):
+            raise ValueError("Sonarr returned invalid episode-file data")
+        return [item for item in payload if isinstance(item, dict)]
+
     def delete_movie(self, movie_id: int, *, add_import_exclusion: bool = True) -> None:
         with self._client_factory(
             base_url=self.base_url,
@@ -77,6 +94,56 @@ class ArrAdapter:
                     "addImportExclusion": str(add_import_exclusion).lower(),
                 },
             )
+            response.raise_for_status()
+
+    def delete_episode_files(self, episode_file_ids: list[int]) -> None:
+        if not episode_file_ids:
+            return
+        with self._client_factory(
+            base_url=self.base_url,
+            headers={
+                "X-Api-Key": self.api_key,
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+            },
+            timeout=60.0,
+            follow_redirects=False,
+        ) as client:
+            response = client.request(
+                "DELETE",
+                "/api/v3/episodefile/bulk",
+                json={"episodeFileIds": episode_file_ids},
+            )
+            response.raise_for_status()
+
+    def set_season_monitored(
+        self, series_id: int, season_number: int, *, monitored: bool
+    ) -> None:
+        series = self.series(series_id)
+        if series is None:
+            raise ValueError("Sonarr no longer reports this series")
+        seasons = series.get("seasons")
+        if not isinstance(seasons, list):
+            raise ValueError("Sonarr returned invalid season data")
+        season_found = False
+        for season in seasons:
+            if isinstance(season, dict) and int(season.get("seasonNumber", -1)) == season_number:
+                season["monitored"] = monitored
+                season_found = True
+                break
+        if not season_found:
+            raise ValueError("Sonarr no longer reports this season")
+        with self._client_factory(
+            base_url=self.base_url,
+            headers={
+                "X-Api-Key": self.api_key,
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+            },
+            timeout=30.0,
+            follow_redirects=False,
+        ) as client:
+            response = client.put(f"/api/v3/series/{series_id}", json=series)
             response.raise_for_status()
 
     def ensure_import_exclusion(self, tmdb_id: int, title: str, year: int | None) -> bool:

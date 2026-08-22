@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import httpx
@@ -135,3 +136,43 @@ def test_radarr_does_not_recreate_an_existing_import_exclusion() -> None:
 
     assert created is False
     assert [request.method for request in observed] == ["GET"]
+
+
+def test_sonarr_deletes_only_selected_episode_files_and_unmonitors_the_season() -> None:
+    observed: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed.append(request)
+        if request.method == "GET" and request.url.path == "/api/v3/series/7":
+            return httpx.Response(
+                200,
+                json={
+                    "id": 7,
+                    "title": "The Show",
+                    "tvdbId": 100,
+                    "seasons": [
+                        {"seasonNumber": 1, "monitored": True},
+                        {"seasonNumber": 2, "monitored": True},
+                    ],
+                },
+            )
+        return httpx.Response(200)
+
+    adapter = ArrAdapter(
+        "http://sonarr:8989", "secret", client_factory=client_factory(handler)
+    )
+    adapter.delete_episode_files([11, 12])
+    adapter.set_season_monitored(7, 2, monitored=False)
+
+    bulk = observed[0]
+    assert bulk.method == "DELETE"
+    assert bulk.url.path == "/api/v3/episodefile/bulk"
+    assert json.loads(bulk.content) == {"episodeFileIds": [11, 12]}
+    update = observed[-1]
+    assert update.method == "PUT"
+    assert update.url.path == "/api/v3/series/7"
+    payload = json.loads(update.content)
+    assert payload["seasons"] == [
+        {"seasonNumber": 1, "monitored": True},
+        {"seasonNumber": 2, "monitored": False},
+    ]

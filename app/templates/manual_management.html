@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% block title %}Manual Management · {{ app_name }}{% endblock %}
+{% block body %}
+<div class="app-shell">
+  {% set active_page = "manual-management" %}{% include "_sidebar.html" %}
+  <main class="workspace manual-management-workspace">
+    <header class="page-header manual-management-header">
+      <div><h1>Manual Management</h1><p class="header-support">Find one requester’s downloaded media in any Arr library, then remove exactly the movies or seasons you select.</p></div>
+      <span class="status-pill status-neutral"><span aria-hidden="true"></span>{{ rollout_policy.mode|replace('_', ' ') }}</span>
+    </header>
+
+    {% if message %}<div class="notice notice-success" role="status">{{ message }}</div>{% endif %}
+    {% if error %}<div class="notice notice-error" role="alert">{{ error }}</div>{% endif %}
+    {% if sync_activity %}<div class="notice notice-warning" role="status">{{ sync_activity.label }} is running. Selection remains available, but execution waits until it finishes.</div>{% endif %}
+
+    {% if batch_result %}
+    {% set batch, batch_items = batch_result %}
+    <section class="manual-run-result" aria-labelledby="manual-run-title">
+      <div class="section-heading">
+        <div><h2 id="manual-run-title">Latest manual run</h2><p>{{ batch.completed_items }} of {{ batch.total_items }} completed{% if batch.failed_items %}; {{ batch.failed_items }} need attention{% endif %}.</p></div>
+        {% if batch.completed_items < batch.total_items %}<form method="post" action="/manual-management/batches/{{ batch.id }}/retry"><input type="hidden" name="csrf" value="{{ csrf_token }}"><button class="button button-attention compact-action" type="submit">Retry unfinished steps</button></form>{% endif %}
+      </div>
+      <div class="manual-run-items">
+        {% for item, identity in batch_items %}
+        <div><span><strong>{{ identity.canonical_title }}</strong><small>{{ item.current_step|replace('_', ' ')|title }}</small></span><em class="manual-item-state manual-item-{{ item.state|lower|replace('_', '-') }}">{{ item.state|replace('_', ' ')|title }}</em>{% if item.last_error %}<small>{{ item.last_error }}</small>{% endif %}</div>
+        {% endfor %}
+      </div>
+    </section>
+    {% endif %}
+
+    <section class="manual-management-workbench" aria-labelledby="manual-workbench-title">
+      <div class="workbench-heading"><div><h2 id="manual-workbench-title">Request ownership workbench</h2><p>Overseerr identifies who requested a title. Provider IDs safely connect that request to the matching movie or seasons in the instance you choose.</p></div><a class="button button-secondary" href="/settings">Sync sources</a></div>
+
+      <form class="manual-management-filters" method="get" action="/manual-management" aria-label="Filter requested media">
+        <label>Overseerr user
+          <select name="requester" required>
+            <option value="">Choose a user</option>
+            {% for requester in manual_page.requesters %}<option value="{{ requester.id }}" {% if manual_page.selected_requester and manual_page.selected_requester.id == requester.id %}selected{% endif %}>{{ requester.display_name or requester.username or requester.email or 'Overseerr user ' ~ requester.external_id }}{% if requester.username %} · @{{ requester.username }}{% endif %}</option>{% endfor %}
+          </select>
+        </label>
+        <label>Target instance
+          <select name="instance" required>
+            <option value="">Choose an instance</option>
+            {% for integration in manual_page.integrations %}<option value="{{ integration.id }}" {% if manual_page.selected_integration and manual_page.selected_integration.id == integration.id %}selected{% endif %}>{{ integration.name }} · {{ integration.kind|title }}{% if not integration.active_management_enabled %} · Active Management off{% elif integration.management_mode != 'MANAGED' %} · {{ integration.management_mode|title }}{% endif %}</option>{% endfor %}
+          </select>
+        </label>
+        <label>Tracker conditions
+          <select name="tracker">
+            <option value="ALL" {% if manual_page.tracker_filter == 'ALL' %}selected{% endif %}>All conditions</option>
+            <option value="MET" {% if manual_page.tracker_filter == 'MET' %}selected{% endif %}>Met or no torrent</option>
+            <option value="NOT_MET" {% if manual_page.tracker_filter == 'NOT_MET' %}selected{% endif %}>Not met or unsafe</option>
+          </select>
+        </label>
+        <button class="button button-primary" type="submit">Show requested media</button>
+      </form>
+
+      {% if manual_page.selected_requester and manual_page.selected_integration %}
+      <div class="manual-filter-summary">
+        <p><strong>{{ manual_page.total_items }}</strong> downloaded {{ 'item' if manual_page.total_items == 1 else 'items' }} across <strong>{{ manual_page.total_groups }}</strong> {{ 'title' if manual_page.total_groups == 1 else 'titles' }}</p>
+        <p>Protection and retention do not override an explicit manual selection; fresh identity, playback, and torrent checks still apply.</p>
+      </div>
+
+      {% if manual_page.groups %}
+      <form class="manual-deletion-form" method="post" action="/manual-management/execute" data-manual-management-form data-filtered-count="{{ manual_page.total_items }}">
+        <input type="hidden" name="csrf" value="{{ csrf_token }}">
+        <input type="hidden" name="requester_profile_id" value="{{ manual_page.selected_requester.id }}">
+        <input type="hidden" name="integration_id" value="{{ manual_page.selected_integration.id }}">
+        <input type="hidden" name="tracker_filter" value="{{ manual_page.tracker_filter }}">
+
+        <div class="manual-selection-bar">
+          <label class="filtered-selection"><input type="checkbox" name="select_all_filtered" value="yes" data-manual-select-all><span><strong>Select all {{ manual_page.total_items }} filtered {{ 'item' if manual_page.total_items == 1 else 'items' }}</strong><small>Includes results on every page.</small></span></label>
+          <span class="selection-status" data-manual-selection-status role="status" aria-live="polite">No items selected</span>
+          <button class="button button-danger" type="button" data-manual-review disabled>Review deletion</button>
+        </div>
+
+        <div class="manual-result-list">
+          {% for group in manual_page.groups %}
+            {% if group.media_type == 'MOVIE' %}
+            {% set candidate = group.candidates[0] %}
+            <article class="manual-media-row">
+              <label class="manual-row-select"><input type="checkbox" name="lifecycle_ids" value="{{ candidate.lifecycle.id }}" data-manual-item aria-label="Select {{ group.title }}"></label>
+              <a class="manual-media-identity" href="/media/{{ candidate.lifecycle.id }}"><span class="media-spine media-spine-movie" aria-hidden="true">M</span><span><strong>{{ group.title }}</strong><small>{{ candidate.integration.name }} · Movie{% if group.year %} · {{ group.year }}{% endif %}</small></span></a>
+              <span class="manual-context"><strong>{{ ((candidate.lifecycle.current_size or 0) / 1073741824)|round(2) }} GiB</strong><small>{% if candidate.requested_at %}Requested {{ format_date(candidate.requested_at) }}{% else %}Request date unavailable{% endif %}</small>{% if candidate.lifecycle.protection_state == 'PROTECTED' %}<em>Protected</em>{% endif %}</span>
+              <span class="manual-tracker-state manual-tracker-{{ candidate.tracker.state|lower }}"><strong>{{ candidate.tracker.label }}</strong><small>{{ candidate.tracker.reason }}</small></span>
+            </article>
+            {% else %}
+            <details class="manual-series-group">
+              <summary>
+                <span class="manual-series-spacer" aria-hidden="true"></span>
+                <span class="manual-media-identity"><span class="media-spine media-spine-season" aria-hidden="true">TV</span><span><strong>{{ group.title }}</strong><small>{{ manual_page.selected_integration.name }} · {{ group.candidates|length }} downloaded {{ 'season' if group.candidates|length == 1 else 'seasons' }}{% if group.year %} · {{ group.year }}{% endif %}</small></span></span>
+                <span class="manual-context"><strong>{{ (group.total_size / 1073741824)|round(2) }} GiB</strong><small>Expand to choose individual seasons</small></span>
+                <span class="manual-series-count"><strong>0 selected</strong><small>Season files only; series remains in Sonarr</small></span>
+              </summary>
+              <div class="manual-season-list">
+                {% for candidate in group.candidates %}
+                <article class="manual-media-row manual-season-row">
+                  <label class="manual-row-select"><input type="checkbox" name="lifecycle_ids" value="{{ candidate.lifecycle.id }}" data-manual-item data-series-key="{{ group.key }}" aria-label="Select {{ candidate.identity.canonical_title }}"></label>
+                  <a class="manual-media-identity" href="/media/{{ candidate.lifecycle.id }}"><span class="media-spine media-spine-season" aria-hidden="true">{% if candidate.identity.season_number == 0 %}SP{% else %}S{{ candidate.identity.season_number }}{% endif %}</span><span><strong>{% if candidate.identity.season_number == 0 %}Specials{% else %}Season {{ candidate.identity.season_number }}{% endif %}</strong><small>{{ group.title }} · {{ candidate.integration.name }}</small></span></a>
+                  <span class="manual-context"><strong>{{ ((candidate.lifecycle.current_size or 0) / 1073741824)|round(2) }} GiB</strong><small>{% if candidate.requested_at %}Requested {{ format_date(candidate.requested_at) }}{% else %}Request date unavailable{% endif %}</small>{% if candidate.lifecycle.protection_state == 'PROTECTED' %}<em>Protected</em>{% endif %}</span>
+                  <span class="manual-tracker-state manual-tracker-{{ candidate.tracker.state|lower }}"><strong>{{ candidate.tracker.label }}</strong><small>{{ candidate.tracker.reason }}</small></span>
+                </article>
+                {% endfor %}
+              </div>
+            </details>
+            {% endif %}
+          {% endfor %}
+        </div>
+
+        <dialog class="manual-deletion-dialog" data-manual-dialog>
+          <div class="manual-dialog-header"><div><h2>Delete selected library files?</h2><p><strong data-manual-dialog-count>0 items</strong> will be sent to {{ manual_page.selected_integration.name }}.</p></div><button class="button button-quiet compact-action" type="button" data-manual-dialog-close>Cancel</button></div>
+          <div class="manual-dialog-warning"><strong>This bypasses protection and retention</strong><p>Each item is rechecked for its provider identity, active Plex playback, tracker conditions, and shared torrents before Arr is allowed to delete files.</p></div>
+          {% if manual_page.selected_integration.kind == 'RADARR' %}
+          <label class="manual-exclusion-choice"><input type="checkbox" name="add_import_exclusion" value="yes" checked><span><strong>Add movies to this Radarr instance’s exclusion list</strong><small>Recommended for mirrored lists. A later Overseerr request can still deliberately add the movie again.</small></span></label>
+          {% else %}
+          <div class="manual-exclusion-note"><strong>Season exclusions are unavailable</strong><p>Sonarr exclusions apply to an entire series. Selected seasons are instead deleted and unmonitored without blocking the remaining show.</p></div>
+          {% endif %}
+          <label class="confirmation-check"><input type="checkbox" name="acknowledge" value="yes" data-manual-acknowledge><span><strong>I authorize these selected library-file deletions</strong><small>Overseerr request records are not changed.</small></span></label>
+          <div class="manual-dialog-actions"><button class="button button-quiet" type="button" data-manual-dialog-close>Keep media</button><button class="button button-danger" type="submit" data-manual-execute disabled>Delete selected</button></div>
+        </dialog>
+      </form>
+
+      {% if manual_page.total_pages > 1 %}
+      <nav class="workbench-pagination" aria-label="Manual Management pages"><span>Page {{ manual_page.page }} of {{ manual_page.total_pages }}</span><div>{% if manual_page.page > 1 %}<a class="button button-secondary compact-action" href="/manual-management?requester={{ manual_page.selected_requester.id }}&instance={{ manual_page.selected_integration.id }}&tracker={{ manual_page.tracker_filter }}&page={{ manual_page.page - 1 }}">Previous</a>{% endif %}{% if manual_page.page < manual_page.total_pages %}<a class="button button-secondary compact-action" href="/manual-management?requester={{ manual_page.selected_requester.id }}&instance={{ manual_page.selected_integration.id }}&tracker={{ manual_page.tracker_filter }}&page={{ manual_page.page + 1 }}">Next</a>{% endif %}</div></nav>
+      {% endif %}
+      {% else %}
+      <div class="empty-state manual-empty"><h3>No downloaded media matches</h3><p>This requester has no downloaded titles in the chosen instance under the current tracker filter. Try All conditions or synchronize Overseerr and the Arr instance.</p></div>
+      {% endif %}
+      {% else %}
+      <div class="manual-start-state"><strong>Choose a person and a library</strong><p>The workbench will match that user’s current Overseerr requests into any Radarr or Sonarr instance by TMDb or TVDb identity—even when the request originated against a different-quality instance.</p></div>
+      {% endif %}
+    </section>
+  </main>
+</div>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', path='/manual-management.js') }}?v={{ static_asset_version }}" defer></script>{% endblock %}

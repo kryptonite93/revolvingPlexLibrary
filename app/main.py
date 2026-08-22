@@ -25,6 +25,7 @@ from app.persistence.models import (
     IntegrationInstance,
     IntegrationLibraryMapping,
     ManagedLibrary,
+    ManualDeletionBatch,
     MediaFileRevision,
     MediaIdentity,
     MediaLifecycle,
@@ -82,6 +83,14 @@ from app.services.inventory import (
     set_requester_protection,
     source_is_fresh,
     sync_integration,
+)
+from app.services.manual_management import (
+    ManualManagementError,
+    batch_results,
+    build_manual_management_page,
+    create_manual_batch,
+    execute_manual_batch,
+    resolve_manual_selection,
 )
 from app.services.media_workbench import WorkbenchRow, build_workbench_page
 from app.services.rollout import change_rollout_mode, get_rollout_policy
@@ -366,6 +375,31 @@ def _deletion_redirect(
     path = f"/deletion-jobs/{job_id}" if job_id else "/deletion-queue"
     query = f"?{urlencode(params)}" if params else ""
     return RedirectResponse(f"{path}{query}", status_code=status.HTTP_303_SEE_OTHER)
+
+
+def _manual_management_redirect(
+    *,
+    requester_profile_id: str = "",
+    integration_id: str = "",
+    tracker_filter: str = "ALL",
+    batch_id: str = "",
+    message: str | None = None,
+    error: str | None = None,
+):
+    query: dict[str, str] = {
+        "requester": requester_profile_id,
+        "instance": integration_id,
+        "tracker": tracker_filter,
+    }
+    if batch_id:
+        query["batch"] = batch_id
+    if message:
+        query["message"] = message
+    if error:
+        query["error"] = error
+    return RedirectResponse(
+        f"/manual-management?{urlencode(query)}", status_code=status.HTTP_303_SEE_OTHER
+    )
 
 
 def _media_lifecycle_query(
@@ -672,6 +706,161 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             {"admin": admin, "message": message, "error": error, "warning": warning}
         )
         return _render(request, "deletion_queue.html", context)
+
+    @app.get("/manual-management", response_class=HTMLResponse)
+    def manual_management_page(
+        request: Request,
+        requester: str = Query(""),
+        instance: str = Query(""),
+        tracker: str = Query("ALL"),
+        page: int = Query(1, ge=1),
+        batch: str = Query(""),
+        message: str | None = None,
+        error: str | None = None,
+        session: Session = Depends(_session),
+    ):
+        admin = _require_admin(request, session)
+        context = build_manual_management_page(
+            session,
+            requester_profile_id=requester,
+            integration_id=instance,
+            tracker_filter=tracker,
+            page=page,
+        )
+        result = batch_results(session, batch) if batch else None
+        return _render(
+            request,
+            "manual_management.html",
+            {
+                "admin": admin,
+                "manual_page": context,
+                "batch_result": result,
+                "message": message,
+                "error": error,
+                "sync_activity": request.app.state.sync_coordinator.current(),
+                "rollout_policy": get_rollout_policy(session),
+            },
+        )
+
+    @app.post("/manual-management/execute")
+    def manual_management_execute(
+        request: Request,
+        requester_profile_id: str = Form(),
+        integration_id: str = Form(),
+        tracker_filter: str = Form("ALL"),
+        lifecycle_ids: list[str] = Form(default=[]),
+        select_all_filtered: str | None = Form(None),
+        add_import_exclusion: str | None = Form(None),
+        acknowledge: str | None = Form(None),
+        csrf: str = Form(),
+        session: Session = Depends(_session),
+    ):
+        verify_csrf(request, csrf)
+        admin = _require_admin(request, session)
+        if acknowledge != "yes":
+            return _manual_management_redirect(
+                requester_profile_id=requester_profile_id,
+                integration_id=integration_id,
+                tracker_filter=tracker_filter,
+                error="Confirm the selected library-file deletions before continuing.",
+            )
+        batch: ManualDeletionBatch | None = None
+        try:
+            profile, integration, candidates = resolve_manual_selection(
+                session,
+                requester_profile_id=requester_profile_id,
+                integration_id=integration_id,
+                tracker_filter=tracker_filter,
+                lifecycle_ids=lifecycle_ids,
+                select_all_filtered=select_all_filtered == "yes",
+            )
+            batch = create_manual_batch(
+                session,
+                profile=profile,
+                integration=integration,
+                candidates=candidates,
+                admin_id=admin.id,
+                add_import_exclusion=add_import_exclusion == "yes",
+            )
+            with request.app.state.sync_coordinator.acquire(
+                batch.id,
+                f"Manual Management: {integration.name}",
+                trigger="manual_management",
+            ):
+                execute_manual_batch(
+                    session,
+                    batch,
+                    request.app.state.credential_cipher,
+                    admin_id=admin.id,
+                )
+        except SyncAlreadyRunning:
+            return _manual_management_redirect(
+                requester_profile_id=requester_profile_id,
+                integration_id=integration_id,
+                tracker_filter=tracker_filter,
+                batch_id=batch.id if batch else "",
+                error="Another inventory or deletion operation is running. Retry this batch later.",
+            )
+        except ManualManagementError as validation_error:
+            session.rollback()
+            return _manual_management_redirect(
+                requester_profile_id=requester_profile_id,
+                integration_id=integration_id,
+                tracker_filter=tracker_filter,
+                error=str(validation_error),
+            )
+        assert batch is not None
+        summary = f"Manual run finished: {batch.completed_items} completed"
+        if batch.failed_items:
+            summary += f" and {batch.failed_items} need attention"
+        return _manual_management_redirect(
+            requester_profile_id=requester_profile_id,
+            integration_id=integration_id,
+            tracker_filter=tracker_filter,
+            batch_id=batch.id,
+            message=f"{summary}.",
+        )
+
+    @app.post("/manual-management/batches/{batch_id}/retry")
+    def manual_management_retry(
+        batch_id: str,
+        request: Request,
+        csrf: str = Form(),
+        session: Session = Depends(_session),
+    ):
+        verify_csrf(request, csrf)
+        admin = _require_admin(request, session)
+        batch = session.get(ManualDeletionBatch, batch_id)
+        if batch is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+        try:
+            with request.app.state.sync_coordinator.acquire(
+                batch.id,
+                "Manual Management retry",
+                trigger="manual_management_retry",
+            ):
+                execute_manual_batch(
+                    session,
+                    batch,
+                    request.app.state.credential_cipher,
+                    admin_id=admin.id,
+                )
+        except SyncAlreadyRunning:
+            return _manual_management_redirect(
+                batch_id=batch.id,
+                error="Another inventory or deletion operation is running. Try again later.",
+            )
+        except ManualManagementError as execution_error:
+            return _manual_management_redirect(batch_id=batch.id, error=str(execution_error))
+        return _manual_management_redirect(
+            requester_profile_id=batch.requester_profile_id,
+            integration_id=batch.integration_id,
+            batch_id=batch.id,
+            message=(
+                f"Retry finished: {batch.completed_items} completed and "
+                f"{batch.failed_items} need attention."
+            ),
+        )
 
     @app.post("/integrations")
     def integrations_create(

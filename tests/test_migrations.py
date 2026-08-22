@@ -34,6 +34,8 @@ def test_migrations_apply_to_empty_database(tmp_path, monkeypatch) -> None:
         "dry_run_proposal",
         "rollout_policy",
         "deletion_job",
+        "manual_deletion_batch",
+        "manual_deletion_item",
         "alembic_version",
     }.issubset(inspector.get_table_names())
     assert "monitored" in {column["name"] for column in inspector.get_columns("media_lifecycle")}
@@ -43,6 +45,7 @@ def test_migrations_apply_to_empty_database(tmp_path, monkeypatch) -> None:
     assert "selected" in {
         column["name"] for column in inspector.get_columns("tracker_policy")
     }
+    assert "user_name" in {column["name"] for column in inspector.get_columns("playback")}
 
 
 def test_tracker_selection_migration_preserves_existing_rules(tmp_path, monkeypatch) -> None:

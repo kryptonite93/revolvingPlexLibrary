@@ -152,6 +152,8 @@ Spacing follows a compact 0.45rem–2rem rhythm. Repeated rows are separated by 
 
 Rollout Control pairs a three-stop stage track with one compact confirmation form. The track and form share a row on wide screens, stack below 1100px, and the track turns vertical on phones. A manual approval case opens with title identity and a four-part safety ledger, then divides the next safe action from its chronological execution trail. Those columns stack below 1100px; the ledger reduces to two columns below 880px and one column on phones, where each trail event also becomes a single-column record.
 
+Manual Management uses a filter-first workbench: Overseerr user, target Arr instance, and tracker conditions form a compact header before any result or selection control. Result and series-summary rows hold four aligned columns—selection, media identity, request context, and tracker state—through 780px; below that breakpoint they become two-column records with metadata stacked under the identity and no horizontal overflow. Its desktop selection bar stays sticky at the top of the workspace, then becomes static below the compact-shell breakpoint and single-column on phones.
+
 **The One Active Form Rule.** Keep one prominent creation or connection form in view while the surrounding list supplies context and management actions.
 
 **The Evidence Before Verdict Rule.** Establish freshness and chronology before presenting a lifecycle decision; the user should be able to trace the verdict in reading order.
@@ -222,7 +224,15 @@ The empty workbench names the missing evidence source and points to integrations
 
 ### Lifecycle Case File
 
-The detail surface enlarges the media spine and verdict, then presents a four-stop timeline for original import, meaningful watch, retention deadline, and protection. Files and revisions, torrent mapping, playback evidence, and request protection use paired divider-led evidence ledgers; a source-freshness ledger closes the case file. Torrent headings state how many torrents link to the current title. When a torrent also maps elsewhere, a compact warning names and links every other lifecycle so a shared-torrent block can be verified directly. Unknown, unmapped, and unavailable evidence is written in place and explains when eligibility is blocked.
+The detail surface enlarges the media spine and verdict, then presents a four-stop timeline for original import, meaningful watch, retention deadline, and protection. Files and revisions, torrent mapping, playback evidence, and request protection use paired divider-led evidence ledgers; a source-freshness ledger closes the case file. Meaningful playback places the Tautulli or Plex user identity beside its timestamp so the evidence remains attributable. Torrent headings state how many torrents link to the current title. When a torrent also maps elsewhere, a compact warning names and links every other lifecycle so a shared-torrent block can be verified directly. Unknown, unmapped, and unavailable evidence is written in place and explains when eligibility is blocked.
+
+### Manual Management Workbench
+
+Manual Management is a requester-owned, cross-instance operational workbench reached from primary navigation. Three explicit filters—Overseerr user, target Radarr or Sonarr instance, and tracker conditions—precede the result set. Movie requests render as direct compact rows. TV requests render as native disclosure rows whose expanded children are independently selectable seasons; season zero is always written as **Specials**, while the series itself remains in Sonarr.
+
+The sticky desktop selection bar keeps the exact selected count, per-page choices, a destructive review action, and select-all across every filtered page in one place. Selecting all filtered results disables individual checkboxes to make the selection scope unambiguous. Protection and retention do not silently defeat an explicit manual selection; identity, active playback, tracker, shared-torrent, and freshness checks still fail closed immediately before mutation.
+
+One modal summarizes the destructive batch and uses one acknowledgment checkbox. Radarr exposes a default-on import-exclusion choice; Sonarr instead explains why exclusions cannot be applied at season scope. The latest batch result remains above the workbench and exposes Retry whenever unfinished work exists, including a pending batch whose execution never started.
 
 ### Integration Setup
 
@@ -272,6 +282,8 @@ Completion confirms Radarr absence, torrent handling, and absence from the paire
 - **Do** treat each media title as a traceable case file with explicit unknown, stale, blocked, and empty states.
 - **Do** state whether each Arr-to-Plex pairing was detected automatically, set manually, or is still pending, with the next safe step beside the control.
 - **Do** keep preparation, the single destructive confirmation, resume, and reconciliation as explicitly named title-scoped states with a persistent correlation identifier and immutable checkpoint trail.
+- **Do** keep manual selection scope, selected count, and cross-page select-all visible before a destructive batch is reviewed.
+- **Do** use native disclosure for selectable TV seasons and label season zero as Specials in every user-facing context.
 - **Do** preserve visible labels, local validation, keyboard focus, and reduced-motion behavior.
 
 ### Don't:
@@ -282,6 +294,8 @@ Completion confirms Radarr absence, torrent handling, and absence from the paire
 - **Don't** collapse lifecycle evidence into a poster grid, a single opaque score, or a color-only verdict.
 - **Don't** infer an Arr-to-Plex pairing from titles, identifiers, or folder similarity, or allow ambiguous and unsynchronized pairing evidence to reach deletion.
 - **Don't** add a typed title, `DELETE` phrase, or separate approval action to manual movie deletion; the title-specific checkbox is the explicit gate.
+- **Don't** let protection or retention silently override explicit manual selection, or let manual intent bypass fresh identity, playback, tracker, and shared-torrent checks.
+- **Don't** describe a season-scoped Sonarr action as an exclusion or show Specials as Season 0.
 - **Don't** let resume or reconciliation obscure completed checkpoints or delete another media item or torrent.
 - **Don't** use ornamental glass, decorative page-load choreography, or graph-heavy console styling.
 - **Don't** expose saved credentials back to the browser.

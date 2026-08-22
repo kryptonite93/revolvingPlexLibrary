@@ -54,3 +54,7 @@ class TautulliAdapter:
             length=length,
         )
         return data if isinstance(data, dict) else {"data": []}
+
+    def user_names(self) -> list[dict[str, Any]]:
+        data = self._command("get_user_names")
+        return [item for item in data if isinstance(item, dict)] if isinstance(data, list) else []

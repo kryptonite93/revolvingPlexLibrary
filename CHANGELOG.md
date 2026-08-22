@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added requester-based Manual Management across Radarr and Sonarr, with cross-instance provider matching, selectable season dropdowns, one-step batch confirmation, live safety revalidation, and optional Radarr import exclusions.
+- Added Tautulli usernames to meaningful playback evidence and backfilled stored playback rows during synchronization.
 - Fixed Plex reconciliation when a successful library refresh returns an empty response.
 - Simplified movie execution to one confirmation checkbox and made every Radarr deletion create or verify an import exclusion so synchronized lists cannot silently restore it.
 - Added restart-safe, explicitly approved movie deletion jobs for a Managed Radarr instance, with fresh live revalidation, Radarr-first ordering, optional mapped-torrent cleanup, and Plex/Overseerr reconciliation.
